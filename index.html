@@ -803,7 +803,8 @@
                 author_name: currentUser=='boy'?'👦 boy':(currentUser=='girl'?'👧 girl':currentUser),
                 description: desc,
                 medias: medias,
-                comments: []
+                comments: [],
+                visibility: 'public'
             };
             
             try {
@@ -829,10 +830,11 @@
                     feeds = data.map(f => ({
                         id: f.id, medias: f.medias || [], desc: f.description || '', author: f.author,
                         authorName: f.author_name, time: new Date(f.created_at).toLocaleString(), comments: f.comments || [],
-                        likes: f.likes || []
+                        likes: f.likes || [], visibility: normalizeVisibility(f.visibility)
                     }));
                 }
             } catch(e) {}
+            feeds = feeds.filter(canViewRecord);
             
             if(!feeds.length){ 
                 document.getElementById('galleryContainer').innerHTML='<div class="empty-gallery">✨ 暂无动态，快发第一条朋友圈吧~</div>'; 
@@ -1012,7 +1014,8 @@
                 author_name: currentUser=='boy'?'👦 boy':(currentUser=='girl'?'👧 girl':currentUser),
                 content: content || '',
                 photo: photoUrl,
-                comments: []
+                comments: [],
+                visibility: 'public'
             };
             
             try { 
@@ -1036,10 +1039,11 @@
                     msgs = data.map(m => ({
                         id: m.id, content: m.content || '', photo: m.photo, author: m.author,
                         author_name: m.author_name, time: new Date(m.created_at).toLocaleString(), comments: m.comments || [],
-                        likes: m.likes || []
+                        likes: m.likes || [], visibility: normalizeVisibility(m.visibility)
                     }));
                 }
             } catch(e) {}
+            msgs = msgs.filter(canViewRecord);
             
             let html = msgs.map(m => { 
                 let canDelete = isAdmin || m.author === currentUser; 
@@ -1181,7 +1185,7 @@
             let val = document.getElementById('loveInput').value.trim(); 
             if(!val) return; 
             let privacy = document.querySelector('input[name="lovePrivacy"]:checked').value; 
-            const newLove = { author: currentUser, author_name: currentUser=='boy'?'👦 boy':(currentUser=='girl'?'👧 girl':currentUser), content: val, privacy: privacy };
+            const newLove = { author: currentUser, author_name: currentUser=='boy'?'👦 boy':(currentUser=='girl'?'👧 girl':currentUser), content: val, privacy: privacy, visibility: 'public' };
             try { 
                 await sb.from('loves').insert(newLove); 
                 // 记录发布感动的话日志
@@ -1197,9 +1201,10 @@
             try {
                 const { data, error } = await sb.from('loves').select('*').order('created_at', { ascending: false });
                 if (!error && data) {
-                    loves = data.map(l => ({ id: l.id, content: l.content, author: l.author, authorName: l.author_name, time: new Date(l.created_at).toLocaleString(), privacy: l.privacy }));
+                    loves = data.map(l => ({ id: l.id, content: l.content, author: l.author, authorName: l.author_name, time: new Date(l.created_at).toLocaleString(), privacy: l.privacy, visibility: normalizeVisibility(l.visibility) }));
                 }
             } catch(e) {}
+            loves = loves.filter(canViewRecord);
             
             let html = loves.map(l => { 
                 if(l.privacy === 'private' && l.author !== currentUser && !isAdmin) return ''; 
@@ -1218,7 +1223,7 @@
             if (!(await requirePermission('full'))) return;
             let val=document.getElementById('memoryInput').value.trim(); 
             if(!val) return; 
-            const newMemory = { author: currentUser, author_name: currentUser=='boy'?'👦 boy':(currentUser=='girl'?'👧 girl':currentUser), content: val };
+            const newMemory = { author: currentUser, author_name: currentUser=='boy'?'👦 boy':(currentUser=='girl'?'👧 girl':currentUser), content: val, visibility: 'public' };
             try { 
                 await sb.from('memories').insert(newMemory); 
                 // 记录添加回忆日志
@@ -1234,9 +1239,10 @@
             try {
                 const { data, error } = await sb.from('memories').select('*').order('created_at', { ascending: false });
                 if (!error && data) {
-                    mem = data.map(m => ({ id: m.id, content: m.content, author: m.author, authorName: m.author_name, time: new Date(m.created_at).toLocaleString() }));
+                    mem = data.map(m => ({ id: m.id, content: m.content, author: m.author, authorName: m.author_name, time: new Date(m.created_at).toLocaleString(), visibility: normalizeVisibility(m.visibility) }));
                 }
             } catch(e) {}
+            mem = mem.filter(canViewRecord);
             
             let html=mem.map(m=>{ 
                 let canDelete = isAdmin || m.author === currentUser; 
@@ -1261,7 +1267,8 @@
                 author_name: currentUser=='boy'?'👦 boy':(currentUser=='girl'?'👧 girl':currentUser),
                 content: content,
                 priority: priority,
-                done: false
+                done: false,
+                visibility: 'public'
             };
             
             try { 
@@ -1282,10 +1289,11 @@
                     memos = data.map(m => ({
                         id: m.id, content: m.content, priority: m.priority || 'normal',
                         done: m.done || false, author: m.author, authorName: m.author_name,
-                        time: new Date(m.created_at).toLocaleString()
+                        time: new Date(m.created_at).toLocaleString(), visibility: normalizeVisibility(m.visibility)
                     }));
                 }
             } catch(e) {}
+            memos = memos.filter(canViewRecord);
             
             let priorityColors = { normal: '#999', important: '#faad14', urgent: '#ff4757' };
             let priorityLabels = { normal: '普通', important: '重要', urgent: '紧急' };
@@ -1317,7 +1325,7 @@
             let title = document.getElementById('scheduleTitle').value.trim(); 
             if(!start || !title) { alert('请填写开始日期和行程标题'); return; } 
             
-            const newSchedule = { author: currentUser, author_name: currentUser=='boy'?'👦 boy':(currentUser=='girl'?'👧 girl':currentUser), title: title, start_date: start, end_date: end || start };
+            const newSchedule = { author: currentUser, author_name: currentUser=='boy'?'👦 boy':(currentUser=='girl'?'👧 girl':currentUser), title: title, start_date: start, end_date: end || start, visibility: 'public' };
             try { 
                 await sb.from('schedules').insert(newSchedule); 
                 // 记录添加行程日志
@@ -1336,9 +1344,10 @@
             try {
                 const { data, error } = await sb.from('schedules').select('*').order('created_at', { ascending: false });
                 if (!error && data) {
-                    schedules = data.map(s => ({ id: s.id, start: s.start_date, end: s.end_date, title: s.title, author: s.author, authorName: s.author_name, time: new Date(s.created_at).toLocaleString() }));
+                    schedules = data.map(s => ({ id: s.id, start: s.start_date, end: s.end_date, title: s.title, author: s.author, authorName: s.author_name, time: new Date(s.created_at).toLocaleString(), visibility: normalizeVisibility(s.visibility) }));
                 }
             } catch(e) {}
+            schedules = schedules.filter(canViewRecord);
             
             let html = schedules.map(s => { 
                 let canDelete = isAdmin || s.author === currentUser; 
@@ -1363,7 +1372,7 @@
             let date = document.getElementById('countdownDate').value; 
             if(!name || !date) { alert('请填写名称和日期'); return; } 
             
-            const newCountdown = { author: currentUser, author_name: currentUser=='boy'?'👦 boy':(currentUser=='girl'?'👧 girl':currentUser), name: name, target_date: date };
+            const newCountdown = { author: currentUser, author_name: currentUser=='boy'?'👦 boy':(currentUser=='girl'?'👧 girl':currentUser), name: name, target_date: date, visibility: 'public' };
             try { 
                 await sb.from('countdowns').insert(newCountdown); 
                 // 记录添加纪念日日志
@@ -1381,9 +1390,10 @@
             try {
                 const { data, error } = await sb.from('countdowns').select('*').order('created_at', { ascending: false });
                 if (!error && data) {
-                    countdowns = data.map(c => ({ id: c.id, name: c.name, date: c.target_date, author: c.author, authorName: c.author_name, time: new Date(c.created_at).toLocaleString() }));
+                    countdowns = data.map(c => ({ id: c.id, name: c.name, date: c.target_date, author: c.author, authorName: c.author_name, time: new Date(c.created_at).toLocaleString(), visibility: normalizeVisibility(c.visibility) }));
                 }
             } catch(e) {}
+            countdowns = countdowns.filter(canViewRecord);
             
             let today = new Date(); 
             today.setHours(0,0,0,0); 
@@ -1424,10 +1434,11 @@
                     markers = data.map(m => ({
                         id: m.id, lat: m.lat, lng: m.lng, name: m.name, 
                         author: m.author, authorName: m.author_name, 
-                        time: new Date(m.created_at).toLocaleString()
+                        time: new Date(m.created_at).toLocaleString(), visibility: normalizeVisibility(m.visibility)
                     }));
                 }
             } catch(e) {}
+            markers = markers.filter(canViewRecord);
             
             if(map) {
                 map.eachLayer(layer => { if(layer instanceof L.Marker) map.removeLayer(layer); });
@@ -1442,7 +1453,8 @@
             const newMarker = { 
                 lat, lng, name, 
                 author: currentUser, 
-                author_name: currentUser=='boy'?'👦 boy':(currentUser=='girl'?'👧 girl':currentUser)
+                author_name: currentUser=='boy'?'👦 boy':(currentUser=='girl'?'👧 girl':currentUser),
+                visibility: 'public'
             }; 
             try { 
                 await sb.from('travel_markers').insert(newMarker); 
@@ -1889,9 +1901,9 @@
             
             try {
                 const { data: feeds } = await sb.from('feeds').select('*').order('created_at', { ascending: false });
-                html += `<div class="admin-section"><h3>📸 时光相册动态 (${feeds ? feeds.length : 0}条)</h3><table class="data-table"><thead><tr><th>描述</th><th>作者</th><th>时间</th><th>操作</th></tr></thead><tbody>`; 
+                html += `<div class="admin-section"><h3>📸 时光相册动态 (${feeds ? feeds.length : 0}条)</h3><table class="data-table"><thead><tr><th>描述</th><th>作者</th><th>时间</th><th>可见性</th><th>操作</th></tr></thead><tbody>`; 
                 if (feeds) for(let f of feeds) { 
-                    html += `<tr><td>${escapeHtml(f.description || '').substring(0,30)}</td><td>${f.author_name}</td><td>${new Date(f.created_at).toLocaleString()}</td><td><button class="admin-btn danger" onclick="deleteFeed('${f.id}')">删除</button></td></tr>`; 
+                    html += `<tr><td>${escapeHtml(f.description || '').substring(0,30)}</td><td>${f.author_name}</td><td>${new Date(f.created_at).toLocaleString()}</td><td>${renderVisibilityAdminControls('feed', f.id, f.visibility)}</td><td><button class="admin-btn danger" onclick="deleteFeed('${f.id}')">删除</button></td></tr>`; 
                 }
                 html += `</tbody></table></div>`;
             } catch(e) {}
@@ -1899,9 +1911,9 @@
             // 💬 留言板管理
             try {
                 const { data: messages } = await sb.from('messages').select('*').order('created_at', { ascending: false });
-                html += `<div class="admin-section"><h3>💬 留言板 (${messages ? messages.length : 0}条)</h3><table class="data-table"><thead><tr><th>内容</th><th>作者</th><th>时间</th><th>操作</th></tr></thead><tbody>`;
+                html += `<div class="admin-section"><h3>💬 留言板 (${messages ? messages.length : 0}条)</h3><table class="data-table"><thead><tr><th>内容</th><th>作者</th><th>时间</th><th>可见性</th><th>操作</th></tr></thead><tbody>`;
                 if (messages) for(let m of messages) {
-                    html += `<tr><td>${escapeHtml(m.content || '').substring(0,30)}</td><td>${m.author_name}</td><td>${new Date(m.created_at).toLocaleString()}</td><td><button class="admin-btn danger" onclick="adminDelete('message', '${m.id}')">删除</button></td></tr>`;
+                    html += `<tr><td>${escapeHtml(m.content || '').substring(0,30)}</td><td>${m.author_name}</td><td>${new Date(m.created_at).toLocaleString()}</td><td>${renderVisibilityAdminControls('message', m.id, m.visibility)}</td><td><button class="admin-btn danger" onclick="adminDelete('message', '${m.id}')">删除</button></td></tr>`;
                 }
                 html += `</tbody></table></div>`;
             } catch(e) {}
@@ -1909,9 +1921,9 @@
             // 💌 感动的话管理
             try {
                 const { data: loves } = await sb.from('loves').select('*').order('created_at', { ascending: false });
-                html += `<div class="admin-section"><h3>💌 感动的话 (${loves ? loves.length : 0}条)</h3><table class="data-table"><thead><tr><th>内容</th><th>作者</th><th>隐私</th><th>时间</th><th>操作</th></tr></thead><tbody>`;
+                html += `<div class="admin-section"><h3>💌 感动的话 (${loves ? loves.length : 0}条)</h3><table class="data-table"><thead><tr><th>内容</th><th>作者</th><th>隐私</th><th>时间</th><th>可见性</th><th>操作</th></tr></thead><tbody>`;
                 if (loves) for(let l of loves) {
-                    html += `<tr><td>${escapeHtml(l.content || '').substring(0,30)}</td><td>${l.author_name}</td><td>${l.privacy === 'private' ? '🔒 私密' : '公开'}</td><td>${new Date(l.created_at).toLocaleString()}</td><td><button class="admin-btn danger" onclick="adminDelete('love', '${l.id}')">删除</button></td></tr>`;
+                    html += `<tr><td>${escapeHtml(l.content || '').substring(0,30)}</td><td>${l.author_name}</td><td>${l.privacy === 'private' ? '🔒 私密' : '公开'}</td><td>${new Date(l.created_at).toLocaleString()}</td><td>${renderVisibilityAdminControls('love', l.id, l.visibility)}</td><td><button class="admin-btn danger" onclick="adminDelete('love', '${l.id}')">删除</button></td></tr>`;
                 }
                 html += `</tbody></table></div>`;
             } catch(e) {}
@@ -1919,9 +1931,9 @@
             // ✨ 一起做过的事管理
             try {
                 const { data: memories } = await sb.from('memories').select('*').order('created_at', { ascending: false });
-                html += `<div class="admin-section"><h3>✨ 一起做过的事 (${memories ? memories.length : 0}条)</h3><table class="data-table"><thead><tr><th>内容</th><th>作者</th><th>时间</th><th>操作</th></tr></thead><tbody>`;
+                html += `<div class="admin-section"><h3>✨ 一起做过的事 (${memories ? memories.length : 0}条)</h3><table class="data-table"><thead><tr><th>内容</th><th>作者</th><th>时间</th><th>可见性</th><th>操作</th></tr></thead><tbody>`;
                 if (memories) for(let mem of memories) {
-                    html += `<tr><td>${escapeHtml(mem.content || '').substring(0,30)}</td><td>${mem.author_name}</td><td>${new Date(mem.created_at).toLocaleString()}</td><td><button class="admin-btn danger" onclick="adminDelete('memory', '${mem.id}')">删除</button></td></tr>`;
+                    html += `<tr><td>${escapeHtml(mem.content || '').substring(0,30)}</td><td>${mem.author_name}</td><td>${new Date(mem.created_at).toLocaleString()}</td><td>${renderVisibilityAdminControls('memory', mem.id, mem.visibility)}</td><td><button class="admin-btn danger" onclick="adminDelete('memory', '${mem.id}')">删除</button></td></tr>`;
                 }
                 html += `</tbody></table></div>`;
             } catch(e) {}
@@ -1929,10 +1941,10 @@
             // 📋 待办备忘录管理
             try {
                 const { data: memos } = await sb.from('memos').select('*').order('created_at', { ascending: false });
-                html += `<div class="admin-section"><h3>📋 待办备忘录 (${memos ? memos.length : 0}条)</h3><table class="data-table"><thead><tr><th>内容</th><th>作者</th><th>优先级</th><th>状态</th><th>操作</th></tr></thead><tbody>`;
+                html += `<div class="admin-section"><h3>📋 待办备忘录 (${memos ? memos.length : 0}条)</h3><table class="data-table"><thead><tr><th>内容</th><th>作者</th><th>优先级</th><th>状态</th><th>可见性</th><th>操作</th></tr></thead><tbody>`;
                 if (memos) for(let memo of memos) {
                     const priorityLabels = { high: '🔴 高', medium: '🟡 中', low: '🟢 低' };
-                    html += `<tr><td>${escapeHtml(memo.content || '').substring(0,30)}</td><td>${memo.author_name}</td><td>${priorityLabels[memo.priority] || memo.priority}</td><td>${memo.done ? '✅ 已完成' : '⏳ 进行中'}</td><td><button class="admin-btn danger" onclick="adminDelete('memo', '${memo.id}')">删除</button></td></tr>`;
+                    html += `<tr><td>${escapeHtml(memo.content || '').substring(0,30)}</td><td>${memo.author_name}</td><td>${priorityLabels[memo.priority] || memo.priority}</td><td>${memo.done ? '✅ 已完成' : '⏳ 进行中'}</td><td>${renderVisibilityAdminControls('memo', memo.id, memo.visibility)}</td><td><button class="admin-btn danger" onclick="adminDelete('memo', '${memo.id}')">删除</button></td></tr>`;
                 }
                 html += `</tbody></table></div>`;
             } catch(e) {}
@@ -1940,10 +1952,10 @@
             // 📝 行程管理
             try {
                 const { data: schedules } = await sb.from('schedules').select('*').order('created_at', { ascending: false });
-                html += `<div class="admin-section"><h3>📝 行程安排 (${schedules ? schedules.length : 0}条)</h3><table class="data-table"><thead><tr><th>标题</th><th>日期</th><th>作者</th><th>操作</th></tr></thead><tbody>`;
+                html += `<div class="admin-section"><h3>📝 行程安排 (${schedules ? schedules.length : 0}条)</h3><table class="data-table"><thead><tr><th>标题</th><th>日期</th><th>作者</th><th>可见性</th><th>操作</th></tr></thead><tbody>`;
                 if (schedules) for(let s of schedules) {
                     let dateRange = s.start_date ? (s.end_date ? `${s.start_date} ~ ${s.end_date}` : s.start_date) : '';
-                    html += `<tr><td>${escapeHtml(s.title || '').substring(0,20)}</td><td>${dateRange}</td><td>${s.author_name}</td><td><button class="admin-btn danger" onclick="adminDelete('schedule', '${s.id}')">删除</button></td></tr>`;
+                    html += `<tr><td>${escapeHtml(s.title || '').substring(0,20)}</td><td>${dateRange}</td><td>${s.author_name}</td><td>${renderVisibilityAdminControls('schedule', s.id, s.visibility)}</td><td><button class="admin-btn danger" onclick="adminDelete('schedule', '${s.id}')">删除</button></td></tr>`;
                 }
                 html += `</tbody></table></div>`;
             } catch(e) {}
@@ -1951,9 +1963,9 @@
             // ⏰ 纪念日倒计时管理
             try {
                 const { data: countdowns } = await sb.from('countdowns').select('*').order('created_at', { ascending: false });
-                html += `<div class="admin-section"><h3>⏰ 纪念日倒计时 (${countdowns ? countdowns.length : 0}条)</h3><table class="data-table"><thead><tr><th>标题</th><th>目标日期</th><th>作者</th><th>操作</th></tr></thead><tbody>`;
+                html += `<div class="admin-section"><h3>⏰ 纪念日倒计时 (${countdowns ? countdowns.length : 0}条)</h3><table class="data-table"><thead><tr><th>标题</th><th>目标日期</th><th>作者</th><th>可见性</th><th>操作</th></tr></thead><tbody>`;
                 if (countdowns) for(let c of countdowns) {
-                    html += `<tr><td>${escapeHtml(c.name || '').substring(0,20)}</td><td>${c.target_date || ''}</td><td>${c.author_name}</td><td><button class="admin-btn danger" onclick="adminDelete('countdown', '${c.id}')">删除</button></td></tr>`;
+                    html += `<tr><td>${escapeHtml(c.name || '').substring(0,20)}</td><td>${c.target_date || ''}</td><td>${c.author_name}</td><td>${renderVisibilityAdminControls('countdown', c.id, c.visibility)}</td><td><button class="admin-btn danger" onclick="adminDelete('countdown', '${c.id}')">删除</button></td></tr>`;
                 }
                 html += `</tbody></table></div>`;
             } catch(e) {}
@@ -1961,9 +1973,9 @@
             // 🗺️ 旅行地图标记管理
             try {
                 const { data: markers } = await sb.from('travel_markers').select('*').order('created_at', { ascending: false });
-                html += `<div class="admin-section"><h3>🗺️ 旅行地图标记 (${markers ? markers.length : 0}个)</h3><table class="data-table"><thead><tr><th>名称</th><th>描述</th><th>作者</th><th>操作</th></tr></thead><tbody>`;
+                html += `<div class="admin-section"><h3>🗺️ 旅行地图标记 (${markers ? markers.length : 0}个)</h3><table class="data-table"><thead><tr><th>名称</th><th>描述</th><th>作者</th><th>可见性</th><th>操作</th></tr></thead><tbody>`;
                 if (markers) for(let mk of markers) {
-                    html += `<tr><td>${escapeHtml(mk.name || '').substring(0,15)}</td><td>${escapeHtml(mk.description || '').substring(0,20)}</td><td>${mk.author_name}</td><td><button class="admin-btn danger" onclick="adminDelete('marker', '${mk.id}')">删除</button></td></tr>`;
+                    html += `<tr><td>${escapeHtml(mk.name || '').substring(0,15)}</td><td>${escapeHtml(mk.description || '').substring(0,20)}</td><td>${mk.author_name}</td><td>${renderVisibilityAdminControls('marker', mk.id, mk.visibility)}</td><td><button class="admin-btn danger" onclick="adminDelete('marker', '${mk.id}')">删除</button></td></tr>`;
                 }
                 html += `</tbody></table></div>`;
             } catch(e) {}
@@ -2012,6 +2024,7 @@
                     'admin_create_user': '🔧 管理员创建账号',
                     'admin_toggle_role': '🔧 切换用户角色',
                     'admin_set_permission': '🔧 设置用户权限',
+                    'admin_toggle_visibility': '🔒 切换对外可见性',
                     'view_page': '👁️ 浏览页面',
                     'switch_tab': '🔄 切换标签页'
                 };
@@ -2344,6 +2357,55 @@
         }
         function escapeHtml(str){ 
             return String(str||'').replace(/[&<>]/g,function(m){return m==='&'?'&amp;':m==='<'?'&lt;':'&gt;';}); 
+        }
+        function isCoupleAccount(username = currentUser) {
+            return username === 'boy' || username === 'girl';
+        }
+        function normalizeVisibility(value) {
+            return value === 'couple_only' ? 'couple_only' : 'public';
+        }
+        function canViewRecord(record) {
+            const visibility = normalizeVisibility(record && record.visibility);
+            return visibility !== 'couple_only' || isAdmin || isCoupleAccount();
+        }
+        function getVisibilityLabel(value) {
+            const visibility = normalizeVisibility(value);
+            return visibility === 'couple_only' ? '🔒 仅情侣可见' : '🌍 公开';
+        }
+        function getVisibilityToggleText(value) {
+            const visibility = normalizeVisibility(value);
+            return visibility === 'couple_only' ? '恢复公开' : '对外隐藏';
+        }
+        function renderVisibilityAdminControls(type, id, visibility) {
+            const normalized = normalizeVisibility(visibility);
+            const nextVisibility = normalized === 'couple_only' ? 'public' : 'couple_only';
+            const dangerClass = normalized === 'couple_only' ? '' : ' danger';
+            return `<span style="display:block;margin-bottom:4px;">${getVisibilityLabel(normalized)}</span><button class="admin-btn${dangerClass}" onclick="toggleRecordVisibility('${type}', '${id}', '${nextVisibility}')">${getVisibilityToggleText(normalized)}</button>`;
+        }
+        async function toggleRecordVisibility(type, id, visibility) {
+            if (!(await requireAdmin())) return;
+            const tableMap = {
+                feed: 'feeds',
+                message: 'messages',
+                love: 'loves',
+                memory: 'memories',
+                memo: 'memos',
+                schedule: 'schedules',
+                countdown: 'countdowns',
+                marker: 'travel_markers'
+            };
+            const table = tableMap[type];
+            const nextVisibility = normalizeVisibility(visibility);
+            if (!table) { alert('未知内容类型'); return; }
+            try {
+                const { error } = await sb.from(table).update({ visibility: nextVisibility }).eq('id', id);
+                if (error) throw error;
+                logAction('admin_toggle_visibility', { type, id, visibility: nextVisibility });
+                renderAdminData();
+                refreshCurrentSection().catch(e => console.log('可见性切换后刷新当前页面失败:', e));
+            } catch(e) {
+                alert('切换可见性失败：请先在 Supabase 执行 docs/supabase-visibility.sql。错误：' + e.message);
+            }
         }
         
         function openImageModal(src){ 

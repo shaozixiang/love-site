@@ -4,7 +4,13 @@ const MAX_UPLOAD_BYTES = 60 * 1024 * 1024;
 const ALLOWED_FOLDERS = new Set(['common', 'feeds', 'messages', 'bubbles', 'avatars']);
 
 module.exports = async function uploadToGitHub(req, res) {
-  setCorsHeaders(res);
+  const originCheck = checkAllowedOrigin(req.headers.origin || '', process.env.UPLOAD_ALLOWED_ORIGINS);
+  setCorsHeaders(res, originCheck.corsOrigin);
+
+  if (!originCheck.allowed) {
+    sendJson(res, 403, { error: 'Upload origin is not allowed.' });
+    return;
+  }
 
   if (req.method === 'OPTIONS') {
     res.statusCode = 204;
@@ -88,10 +94,26 @@ module.exports = async function uploadToGitHub(req, res) {
   }
 };
 
-function setCorsHeaders(res) {
-  res.setHeader('Access-Control-Allow-Origin', '*');
+function setCorsHeaders(res, origin) {
+  if (origin) res.setHeader('Access-Control-Allow-Origin', origin);
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  res.setHeader('Vary', 'Origin');
+}
+
+function checkAllowedOrigin(origin, allowedOriginsConfig) {
+  const allowedOrigins = parseAllowedOrigins(allowedOriginsConfig);
+  if (allowedOrigins.length === 0) return { allowed: true, corsOrigin: '*' };
+  if (!origin) return { allowed: true, corsOrigin: allowedOrigins[0] };
+  const allowed = allowedOrigins.includes(origin);
+  return { allowed, corsOrigin: allowed ? origin : '' };
+}
+
+function parseAllowedOrigins(value) {
+  return String(value || '')
+    .split(',')
+    .map(item => item.trim())
+    .filter(Boolean);
 }
 
 function sendJson(res, status, payload) {
