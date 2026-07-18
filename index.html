@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
@@ -673,6 +673,8 @@
             return nameMatch ? nameMatch[1] : 'bin';
         }
         let bubbleClicked = 0, currentUser = '', isAdmin = false, storageMode = 'cloud', map = null, markers = [], currentTab = 'message';
+        let lastUserSyncError = null;
+        let lastPermissionError = null;
         const START_DATE = new Date(2023, 11, 12);
         let floatPhotos = [], bubbleEnabled = true, bubbleIntervalSec = 12, bubbleTimer = null, activeBubbleCount = 0;
         
@@ -924,7 +926,7 @@
                 if(data) {
                     let currentComments = data.comments || [];
                     let deletedComment = currentComments[commentIdx];
-                    if (!ensureCommentMutationAllowed(deletedComment)) return;
+                    if (!(await ensureCommentMutationAllowed(deletedComment))) return;
                     currentComments.splice(commentIdx, 1);
                     await sb.from('feeds').update({ comments: currentComments }).eq('id', feedId);
                     // 记录删除评论日志
@@ -1112,7 +1114,7 @@
                 if(data) {
                     let currentComments = data.comments || [];
                     let deletedComment = currentComments[commentIdx];
-                    if (!ensureCommentMutationAllowed(deletedComment)) return;
+                    if (!(await ensureCommentMutationAllowed(deletedComment))) return;
                     currentComments.splice(commentIdx, 1);
                     await sb.from('messages').update({ comments: currentComments }).eq('id', msgId);
                     // 记录删除评论日志
@@ -2044,8 +2046,11 @@
             if(username === 'admin') { alert('不能删除管理员账号'); return; } 
             let users = await loadUserData(); 
             delete users[username]; 
-            try { await sb.from('users').delete().eq('username', username); } catch(e) {}
-            await saveUsers(users); 
+            try { 
+                const { error } = await sb.from('users').delete().eq('username', username);
+                if (error) throw error;
+                localStorage.setItem('couple_users', JSON.stringify(normalizeUsers(users)));
+            } catch(e) { alert('删除账号失败：' + e.message); return; }
             // 记录删除用户日志
             logAction('admin_delete_user', { username: username });
             renderAdminData(); 
@@ -2101,8 +2106,10 @@
             // 记录日志
             logAction('admin_toggle_role', { username: username, new_role: users[username].role });
             
-            await saveUsers(users);
-            renderAdminData();
+            try {
+                await saveUsers(users);
+                renderAdminData();
+            } catch(e) { alert('保存角色失败：' + e.message); }
         }
         
         async function setUserPermission(username, permission) {
@@ -2122,8 +2129,11 @@
             // 记录日志
             logAction('admin_set_permission', { username: username, permission: permission });
             
-            await saveUsers(users);
-            alert(`已将 ${username} 的权限设为：${permLabels[permission]}`);
+            try {
+                await saveUsers(users);
+                alert(`已将 ${username} 的权限设为：${permLabels[permission]}`);
+                renderAdminData();
+            } catch(e) { alert('保存权限失败：' + e.message); }
         }
         
         // 权限检查函数
@@ -2166,28 +2176,53 @@
         }
         async function forceRefreshUserData() {
             const defaultUsers = {"boy":{"pwd":"love1314","avatar":"","permission":"full","role":"user"},"girl":{"pwd":"love1314","avatar":"","permission":"full","role":"user"},"admin":{"pwd":"admin123","avatar":"","permission":"full","role":"admin"}};
-            let users = JSON.parse(localStorage.getItem('couple_users') || 'null') || defaultUsers;
+            let users = defaultUsers;
             try {
                 const { data, error } = await sb.from('users').select('*');
                 if (!error && data && data.length > 0) {
                     let cloudUsers = {};
                     data.forEach(u => {
-                        cloudUsers[u.username] = {
+                        cloudUsers[u.username] = normalizeUserInfo(u.username, {
                             pwd: u.password,
                             avatar: u.avatar || '',
                             permission: u.permission || 'full',
                             role: u.role || (u.username === 'admin' ? 'admin' : 'user')
-                        };
+                        });
                     });
-                    users = { ...users, ...cloudUsers };
+                    users = { ...defaultUsers, ...cloudUsers };
                     localStorage.setItem('couple_users', JSON.stringify(users));
                 }
-            } catch(e) {}
-            for (let uname in users) {
-                if (!users[uname].permission) users[uname].permission = 'full';
-                if (!users[uname].role) users[uname].role = (uname === 'admin') ? 'admin' : 'user';
+            } catch(e) {
+                users = JSON.parse(localStorage.getItem('couple_users') || 'null') || defaultUsers;
             }
+            users = normalizeUsers(users);
+            localStorage.setItem('couple_users', JSON.stringify(users));
             return users;
+        }
+        function normalizeUsers(users) {
+            const normalized = {};
+            for (let [username, info] of Object.entries(users || {})) {
+                normalized[username] = normalizeUserInfo(username, info);
+            }
+            return normalized;
+        }
+        function normalizeUserInfo(username, info = {}) {
+            return {
+                pwd: info.pwd || info.password || 'love1314',
+                avatar: info.avatar || '',
+                permission: ['view', 'comment', 'full'].includes(info.permission) ? info.permission : 'full',
+                role: (info.role === 'admin' || username === 'admin') ? 'admin' : 'user'
+            };
+        }
+        function buildUserRow(username, info = {}) {
+            const normalized = normalizeUserInfo(username, info);
+            return {
+                username,
+                password: normalized.pwd,
+                avatar: normalized.avatar,
+                permission: normalized.permission,
+                role: normalized.role
+            };
         }
         
         // ========== 管理员操作日志功能 ==========
@@ -2263,69 +2298,22 @@
 
         // 🌟 核心提速修改点：优先读取本地，异步在后台同步云端
         async function loadUserData() { 
-            const localCache = localStorage.getItem('couple_users');
-            const defaultUsers = {"boy":{"pwd":"love1314","avatar":"","permission":"full","role":"user"},"girl":{"pwd":"love1314","avatar":"","permission":"full","role":"user"},"admin":{"pwd":"admin123","avatar":"","permission":"full","role":"admin"}};
-            
-            // 异步在后台获取云端最新用户数据，合并到本地（不覆盖）
-            sb.from('users').select('*').then(({ data, error }) => {
-                if (!error && data && data.length > 0) {
-                    let cloudUsers = {};
-                    data.forEach(u => { 
-                        cloudUsers[u.username] = { 
-                            pwd: u.password, 
-                            avatar: u.avatar || '',
-                            permission: u.permission || 'full',
-                            role: u.role || (u.username === 'admin' ? 'admin' : 'user')
-                        }; 
-                    });
-                    
-                    // 合并云端和本地数据，而不是覆盖
-                    let localUsers = localCache ? JSON.parse(localCache) : {};
-                    let mergedUsers = { ...localUsers, ...cloudUsers };
-                    // 确保每个用户都有默认的 permission 和 role
-                    for (let uname in mergedUsers) {
-                        if (!mergedUsers[uname].permission) mergedUsers[uname].permission = 'full';
-                        if (!mergedUsers[uname].role) mergedUsers[uname].role = (uname === 'admin') ? 'admin' : 'user';
-                    }
-                    localStorage.setItem('couple_users', JSON.stringify(mergedUsers));
-                }
-            });
-
-            let result = localCache ? JSON.parse(localCache) : defaultUsers;
-            // 确保返回的用户数据都有默认的 permission 和 role
-            for (let uname in result) {
-                if (!result[uname].permission) result[uname].permission = 'full';
-                if (!result[uname].role) result[uname].role = (uname === 'admin') ? 'admin' : 'user';
-            }
-            return result;
+            return await forceRefreshUserData();
         }
 
         async function saveUsers(users) { 
+            users = normalizeUsers(users);
+            let syncError = null;
+            for (let [username, info] of Object.entries(users)) {
+                const row = buildUserRow(username, info);
+                const { error } = await sb.from('users').upsert(row, { onConflict: 'username' });
+                if (error) {
+                    syncError = error;
+                    break;
+                }
+            }
+            if (syncError) throw syncError;
             localStorage.setItem('couple_users', JSON.stringify(users));
-            // 移出登录阻塞队列，改为静默后台同步
-            setTimeout(async () => {
-                try {
-                    for (let [username, info] of Object.entries(users)) {
-                        const { data } = await sb.from('users').select('*').eq('username', username).maybeSingle();
-                        if (data) {
-                            await sb.from('users').update({ 
-                                password: info.pwd, 
-                                avatar: info.avatar || '',
-                                permission: info.permission || 'full',
-                                role: info.role || (username === 'admin' ? 'admin' : 'user')
-                            }).eq('username', username);
-                        } else {
-                            await sb.from('users').insert({ 
-                                username, 
-                                password: info.pwd, 
-                                avatar: info.avatar || '',
-                                permission: info.permission || 'full',
-                                role: info.role || (username === 'admin' ? 'admin' : 'user')
-                            });
-                        }
-                    }
-                } catch(e) {}
-            }, 100);
         }
 
         async function updateAvatar() { 
@@ -2335,7 +2323,7 @@
             reader.onload = async e => { 
                 let users = await loadUserData(); 
                 if(users[currentUser]) users[currentUser].avatar = e.target.result; 
-                await saveUsers(users); 
+                try { await saveUsers(users); } catch(err) { alert('头像同步到云端失败：' + err.message); return; }
                 document.getElementById('userAvatarImg').src = e.target.result; 
                 closeModalById('avatarModal'); 
                 // 记录更新头像日志
@@ -2358,7 +2346,7 @@
             if(newPwd !== confirm) { alert('两次新密码不一致'); return; } 
             if(newPwd.length < 4) { alert('密码至少4位'); return; } 
             users[currentUser].pwd = newPwd; 
-            await saveUsers(users); 
+            try { await saveUsers(users); } catch(e) { alert('密码同步到云端失败：' + e.message); return; }
             // 记录修改密码成功日志
             logAction('change_password', { success: true });
             alert('密码修改成功，请重新登录'); 
@@ -2374,8 +2362,13 @@
             if(!newName || !newPwd) { alert('请填写账号和密码'); return; } 
             let users = await loadUserData(); 
             if(users[newName]) { alert('账号已存在'); return; } 
-            users[newName] = { pwd: newPwd, avatar: '' }; 
-            await saveUsers(users); 
+            users[newName] = { pwd: newPwd, avatar: '', permission: 'full', role: 'user' }; 
+            try { 
+                await saveUsers(users); 
+            } catch(e) { 
+                alert('注册失败：账号没有同步到云端。请先检查 Supabase users 表是否已运行 docs/supabase-permissions.sql。\n\n错误：' + e.message);
+                return;
+            }
             alert(`账号 ${newName} 注册成功！`); 
             document.getElementById('newUsername').value = ''; 
             document.getElementById('newUserPwd').value = ''; 
@@ -2472,17 +2465,6 @@
             if(btn) { btn.disabled = true; btn.innerText = '正在登录...'; }
 
             let users = await loadUserData(); 
-            
-            if(u==='admin' && p==='admin123'){ 
-                currentUser='admin'; isAdmin=true; 
-                localStorage.setItem('couple_logged_user', 'admin');
-                document.getElementById('loginPage').style.display='none'; 
-                loadStorageModeSetting();
-                // 管理员也进入主页面，同时拥有管理权限
-                enterMainSystem('admin', users);
-                if(btn) { btn.disabled = false; btn.innerText = '登录'; }
-                return; 
-            } 
             
             if(users[u] && users[u].pwd===p){ 
                 localStorage.setItem('couple_logged_user', u);
@@ -2598,6 +2580,263 @@
         }
         function closeVideoModal(){ document.getElementById('videoModal').style.display='none'; }
 
+        // ========== Account and permission final override layer ==========
+        function updateAdminVisibility() {
+            const adminBtn = document.getElementById('adminEntryBtn');
+            if (adminBtn) adminBtn.style.display = isAdmin ? 'block' : 'none';
+        }
+        async function forceRefreshUserData(options = {}) {
+            const allowLocalFallback = options.allowLocalFallback !== false;
+            const defaultUsers = {"boy":{"pwd":"love1314","avatar":"","permission":"full","role":"user"},"girl":{"pwd":"love1314","avatar":"","permission":"full","role":"user"},"admin":{"pwd":"admin123","avatar":"","permission":"full","role":"admin"}};
+            let users = defaultUsers;
+            try {
+                const { data, error } = await sb.from('users').select('*');
+                if (error) throw error;
+                let cloudUsers = {};
+                if (data && data.length > 0) {
+                    data.forEach(u => {
+                        cloudUsers[u.username] = normalizeUserInfo(u.username, {
+                            pwd: u.password,
+                            avatar: u.avatar || '',
+                            permission: u.permission || 'full',
+                            role: u.role || (u.username === 'admin' ? 'admin' : 'user')
+                        });
+                    });
+                }
+                users = { ...defaultUsers, ...cloudUsers };
+                lastUserSyncError = null;
+                localStorage.setItem('couple_users', JSON.stringify(users));
+            } catch(e) {
+                lastUserSyncError = e;
+                if (!allowLocalFallback) throw e;
+                users = JSON.parse(localStorage.getItem('couple_users') || 'null') || defaultUsers;
+            }
+            users = normalizeUsers(users);
+            localStorage.setItem('couple_users', JSON.stringify(users));
+            return users;
+        }
+        async function loadUserData(options = {}) {
+            return await forceRefreshUserData(options);
+        }
+        async function saveUsers(users) {
+            users = normalizeUsers(users);
+            let syncError = null;
+            for (let [username, info] of Object.entries(users)) {
+                const row = buildUserRow(username, info);
+                const { error } = await sb.from('users').upsert(row, { onConflict: 'username' });
+                if (error) {
+                    syncError = error;
+                    break;
+                }
+            }
+            if (syncError) {
+                lastUserSyncError = syncError;
+                throw syncError;
+            }
+            lastUserSyncError = null;
+            localStorage.setItem('couple_users', JSON.stringify(users));
+        }
+        async function hasPermission(required) {
+            try {
+                const users = await forceRefreshUserData({ allowLocalFallback: false });
+                const userInfo = users[currentUser];
+                if (!userInfo) return false;
+                isAdmin = (currentUser === 'admin') || userInfo.role === 'admin';
+                updateAdminVisibility();
+                if (isAdmin) return true;
+                const userPerm = userInfo.permission || 'full';
+                const levels = { 'view': 1, 'comment': 2, 'full': 3 };
+                lastPermissionError = null;
+                return (levels[userPerm] || 3) >= (levels[required] || 0);
+            } catch(e) {
+                lastPermissionError = e;
+                console.error('权限检查失败:', e);
+                return false;
+            }
+        }
+        async function requirePermission(required) {
+            const ok = await hasPermission(required);
+            if (!ok) {
+                const labels = { view: '浏览', comment: '评论/点赞', full: '发布/修改' };
+                const extra = lastPermissionError ? '\n\n如果你刚改过权限，请检查 Supabase users 表字段和网络连接。错误：' + lastPermissionError.message : '';
+                alert(`当前账号没有“${labels[required] || required}”权限，请联系管理员调整权限${extra}`);
+            }
+            return ok;
+        }
+        async function requireAdmin() {
+            try {
+                const users = await forceRefreshUserData({ allowLocalFallback: false });
+                const userInfo = users[currentUser];
+                isAdmin = !!(userInfo && ((currentUser === 'admin') || userInfo.role === 'admin'));
+                updateAdminVisibility();
+                if (!isAdmin) alert('无权限：只有管理员可以操作这里');
+                return isAdmin;
+            } catch(e) {
+                alert('无法确认管理员权限，请检查 Supabase users 表和网络连接。错误：' + e.message);
+                return false;
+            }
+        }
+        async function canDeleteRecord(table, id) {
+            if (!(await hasPermission('full'))) {
+                alert('删除内容需要“完整权限”，请联系管理员调整权限');
+                return false;
+            }
+            if (isAdmin) return true;
+            try {
+                const { data, error } = await sb.from(table).select('author').eq('id', id).maybeSingle();
+                if (!error && data && data.author === currentUser) return true;
+            } catch(e) {}
+            alert('只能删除自己发布的内容，或让管理员删除');
+            return false;
+        }
+        async function ensureCommentMutationAllowed(comment) {
+            if (!(await hasPermission('comment'))) {
+                alert('删除评论需要“评论/点赞”权限，请联系管理员调整权限');
+                return false;
+            }
+            if (isAdmin || (comment && comment.author === currentUser)) return true;
+            alert('只能删除自己的评论，或让管理员删除');
+            return false;
+        }
+        async function showRegisterModal() {
+            if (!(await requireAdmin())) return;
+            document.getElementById('registerModal').style.display='flex';
+        }
+        async function openAdminPanel() {
+            if (!(await requireAdmin())) return;
+            document.getElementById('adminPanel').style.display = 'block';
+            renderAdminData();
+        }
+        async function deleteUserAccount(username) {
+            if (!(await requireAdmin())) return;
+            if(username === 'admin') { alert('不能删除管理员账号'); return; }
+            let users = await loadUserData({ allowLocalFallback: false });
+            if (!users[username]) { alert('用户不存在'); return; }
+            delete users[username];
+            try {
+                const { error } = await sb.from('users').delete().eq('username', username);
+                if (error) throw error;
+                localStorage.setItem('couple_users', JSON.stringify(normalizeUsers(users)));
+            } catch(e) { alert('删除账号失败：' + e.message); return; }
+            logAction('admin_delete_user', { username: username });
+            renderAdminData();
+            alert(`账号 ${username} 已删除`);
+        }
+        async function toggleUserRole(username) {
+            if (!(await requireAdmin())) return;
+            if (username === 'admin') { alert('不能修改超级管理员的角色'); return; }
+            let users = await loadUserData({ allowLocalFallback: false });
+            if (!users[username]) { alert('用户不存在'); return; }
+            users[username].role = users[username].role === 'admin' ? 'user' : 'admin';
+            try {
+                await saveUsers(users);
+                logAction('admin_toggle_role', { username: username, new_role: users[username].role });
+                renderAdminData();
+                alert(`已将 ${username} 设为${users[username].role === 'admin' ? '管理员' : '普通用户'}`);
+            } catch(e) { alert('保存角色失败：' + e.message); }
+        }
+        async function setUserPermission(username, permission) {
+            if (!(await requireAdmin())) return;
+            if (username === 'admin') { alert('不能修改超级管理员的权限'); return; }
+            let users = await loadUserData({ allowLocalFallback: false });
+            if (!users[username]) { alert('用户不存在'); return; }
+            if (!['view', 'comment', 'full'].includes(permission)) { alert('权限值不正确'); return; }
+            users[username].permission = permission;
+            try {
+                await saveUsers(users);
+                logAction('admin_set_permission', { username: username, permission: permission });
+                const permLabels = { 'full': '完全权限', 'comment': '仅评论', 'view': '仅浏览' };
+                alert(`已将 ${username} 的权限设为：${permLabels[permission]}`);
+                renderAdminData();
+            } catch(e) { alert('保存权限失败：' + e.message); }
+        }
+        async function resetUserPwd(username) {
+            if (!(await requireAdmin())) return;
+            let users = await loadUserData({ allowLocalFallback: false });
+            if(!users[username]) { alert('用户不存在'); return; }
+            users[username].pwd='love1314';
+            try {
+                await saveUsers(users);
+            } catch(e) { alert('重置密码失败：账号没有同步到云端。错误：' + e.message); return; }
+            logAction('admin_reset_pwd', { username: username });
+            renderAdminData();
+            alert(`${username} 密码已重置为 love1314`);
+        }
+        async function autoLogin() {
+            let savedUser = localStorage.getItem('couple_logged_user');
+            if (!savedUser) return false;
+            try {
+                let users = await loadUserData({ allowLocalFallback: false });
+                if (users[savedUser]) {
+                    enterMainSystem(savedUser, users);
+                    return true;
+                }
+            } catch(e) {
+                localStorage.removeItem('couple_logged_user');
+                console.warn('自动登录失败，需要重新登录:', e);
+                document.getElementById('bubbleLayer').style.display = 'none';
+                document.getElementById('mainPage').style.display = 'none';
+                document.getElementById('loginPage').style.display = 'flex';
+                updateAdminVisibility();
+            }
+            return false;
+        }
+        async function login(){ 
+            const u = document.getElementById('username').value.trim(); 
+            const p = document.getElementById('password').value.trim(); 
+            const btn = document.getElementById('loginBtn');
+            if(!u || !p) { alert('请输入账号和密码'); return; }
+            if(btn) { btn.disabled = true; btn.innerText = '正在登录...'; }
+            try {
+                let users = await loadUserData({ allowLocalFallback: false });
+                if(users[u] && users[u].pwd===p){ 
+                    localStorage.setItem('couple_logged_user', u);
+                    enterMainSystem(u, users);
+                } else { 
+                    logAction('login_failed', { username: u, reason: '账号或密码错误' });
+                    alert('账号或密码错误'); 
+                }
+            } catch(e) {
+                alert('登录失败：无法从 Supabase 读取账号。请确认 users 表权限、字段和网络连接。错误：' + e.message);
+            } finally {
+                if(btn) { btn.disabled = false; btn.innerText = '登录'; }
+            }
+        }
+        function enterMainSystem(username, users) {
+            currentUser = username;
+            const userInfo = users[username] || {};
+            isAdmin = (username === 'admin') || userInfo.role === 'admin';
+            updateAdminVisibility();
+            updateActivity();
+            logAction('login', { username: username });
+            loadAngryData().then(() => {
+                if (document.getElementById('angryMask').style.display === 'flex') return;
+                document.getElementById('bubbleLayer').style.display = 'none';
+                document.getElementById('loginPage').style.display = 'none';
+                document.getElementById('mainPage').style.display = 'block';
+                document.getElementById('displayUsername').innerHTML = username==='boy'?'👦 boy':(username==='girl'?'👧 girl':username);
+                const avatar = userInfo.avatar;
+                if(avatar) document.getElementById('userAvatarImg').src = avatar;
+                loadStorageModeSetting();
+                updateTogetherDays();
+                updateAdminVisibility();
+                Promise.all([
+                    renderMessages(), renderFeeds(), renderLoves(),
+                    renderMemories(), renderMemos(), renderSchedules(),
+                    renderCountdowns(), loadBubbleConfig()
+                ]);
+                startAutoSync();
+                startHeartbeat();
+                setTimeout(updateOnlineStatus, 1000);
+                if (onlineStatusTimer) clearInterval(onlineStatusTimer);
+                onlineStatusTimer = setInterval(updateOnlineStatus, ONLINE_STATUS_INTERVAL_MS);
+            });
+        }
+        async function openBubbleSettings(){ 
+            if (!(await requirePermission('full'))) return;
+            document.getElementById('bubbleSettingsModal').style.display='flex'; 
+            renderBubblePreview(); 
+        }
         // ========== DOM加载完成后初始化 ==========
         window.onload = function(){
             // 优化：先同步检查是否有登录状态，有就立即隐藏气泡层，避免闪烁
@@ -2608,6 +2847,7 @@
             autoLogin();
             
             if(!localStorage.getItem('couple_users')) localStorage.setItem('couple_users','{"boy":{"pwd":"love1314","avatar":""},"girl":{"pwd":"love1314","avatar":""},"admin":{"pwd":"admin123","avatar":""}}');
+            forceRefreshUserData();
             loadStorageModeSetting(); 
             let texts=['宝宝我爱你','我超喜欢你','我们要一直在一起','最爱宝宝啦'];
             for(let i=0;i<25;i++){ 
@@ -2685,3 +2925,6 @@
     </script>
 </body>
 </html>
+
+
+

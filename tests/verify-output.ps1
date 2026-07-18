@@ -9,6 +9,7 @@ $requiredFiles = @(
   '.env.example',
   'docs/change-report.md',
   'docs/deployment-guide.md',
+  'docs/account-permission-audit-report.md',
   'docs/supabase-permissions.sql'
 )
 
@@ -27,7 +28,15 @@ if ($combined -match 'ghp_[A-Za-z0-9_]+') {
   throw 'A GitHub personal access token appears to be committed in the files.'
 }
 
-$index = Get-Content -LiteralPath (Join-Path $root 'index.txt') -Raw
+$indexPath = Join-Path $root 'index.txt'
+$htmlPath = Join-Path $root 'index.html'
+$index = Get-Content -LiteralPath $indexPath -Raw
+$txtHash = (Get-FileHash -LiteralPath $indexPath -Algorithm SHA256).Hash
+$htmlHash = (Get-FileHash -LiteralPath $htmlPath -Algorithm SHA256).Hash
+if ($txtHash -ne $htmlHash) {
+  throw 'index.html must match index.txt because Cloudflare deploys the HTML file.'
+}
+
 if ($index -match "storage\.from\('couple-media'\)\.upload") {
   throw 'index.txt still uploads new media to Supabase Storage.'
 }
@@ -55,7 +64,69 @@ if ($index -notmatch 'GITHUB_DIRECT_UPLOAD_TEST_MODE = false') {
 if ($index -notmatch 'requirePermission' -or $index -notmatch 'forceRefreshUserData') {
   throw 'index.txt is missing the refreshed permission enforcement helpers.'
 }
-foreach ($fn in @('addLove', 'addMemory', 'addMemo', 'addSchedule', 'addCountdown', 'addMarker', 'toggleAngryMode')) {
+if ($index -match "setTimeout\(async \(\) =>") {
+  throw 'User cloud sync must not be delayed through setTimeout because cross-device registration can appear successful locally but fail remotely.'
+}
+if ($index -match "u==='admin' && p==='admin123'") {
+  throw 'Login must not bypass cloud user data with a hardcoded admin password.'
+}
+if ($index -notmatch 'function normalizeUsers' -or $index -notmatch 'function buildUserRow') {
+  throw 'index.txt is missing normalized cloud user serialization helpers.'
+}
+if ($index -notmatch '\.upsert\(row, \{ onConflict: ''username'' \}\)') {
+  throw 'User sync requires username-based upsert in code.'
+}
+$permissionsSql = Get-Content -LiteralPath (Join-Path $root 'docs/supabase-permissions.sql') -Raw
+if ($permissionsSql -notmatch 'users_username_key' -or $permissionsSql -notmatch 'unique \(username\)') {
+  throw 'Supabase permissions SQL must add a unique username constraint for cross-device account sync.'
+}
+if ($index -notmatch 'users = \{ \.\.\.defaultUsers, \.\.\.cloudUsers \}') {
+  throw 'Cloud user refresh must not merge stale arbitrary local users ahead of cloud data.'
+}
+if ($index -notmatch 'async function saveUsers[\s\S]*?throw syncError') {
+  throw 'saveUsers must surface cloud sync failures instead of silently ignoring them.'
+}
+if ($index -notmatch 'async function registerNewUser[\s\S]*?permission: ''full''[\s\S]*?role: ''user''[\s\S]*?catch') {
+  throw 'registerNewUser must create full user records and report save failures.'
+}
+if ($index -notmatch 'let lastUserSyncError = null' -or $index -notmatch 'let lastPermissionError = null') {
+  throw 'User sync and permission failures must be tracked instead of silently falling back to localStorage.'
+}
+if ($index -notmatch 'forceRefreshUserData\(options = \{\}\)' -or $index -notmatch 'allowLocalFallback') {
+  throw 'forceRefreshUserData must support strict cloud reads for login and permission checks.'
+}
+if ($index -notmatch 'async function login[\s\S]*?loadUserData\(\{ allowLocalFallback: false \}\)[\s\S]*?catch') {
+  throw 'login must fail clearly when cloud user data cannot be read, rather than using stale local users.'
+}
+if ($index -notmatch 'async function autoLogin[\s\S]*?loadUserData\(\{ allowLocalFallback: false \}\)[\s\S]*?catch') {
+  throw 'autoLogin must refresh cloud user data before restoring a session.'
+}
+if ($index -notmatch 'function updateAdminVisibility' -or $index -notmatch 'adminBtn\.style\.display = isAdmin \? ''block'' : ''none''') {
+  throw 'Admin button visibility must be explicitly refreshed for both admin and non-admin users.'
+}
+if ($index -notmatch 'async function requireAdmin' -or $index -notmatch 'forceRefreshUserData\(\{ allowLocalFallback: false \}\)') {
+  throw 'Admin actions must re-check cloud role data before opening or changing admin settings.'
+}
+foreach ($fn in @('showRegisterModal', 'openAdminPanel', 'deleteUserAccount', 'toggleUserRole', 'setUserPermission', 'resetUserPwd')) {
+  $pattern = "async function $fn[\s\S]*?requireAdmin\(\)"
+  if ($index -notmatch $pattern) { throw "$fn must require an up-to-date admin role." }
+}
+if ($index -notmatch 'async function resetUserPwd[\s\S]*?try[\s\S]*?saveUsers\(users\)[\s\S]*?catch') {
+  throw 'resetUserPwd must report cloud save failures instead of appearing successful locally.'
+}
+if ($index -notmatch 'async function hasPermission[\s\S]*?forceRefreshUserData\(\{ allowLocalFallback: false \}\)[\s\S]*?isAdmin =') {
+  throw 'Permission checks must refresh cloud role/permission data before trusting cached isAdmin.'
+}
+if ($index -notmatch 'async function canDeleteRecord[\s\S]*?hasPermission\(''full''\)') {
+  throw 'Deleting records must require full permission for non-admin users.'
+}
+if ($index -notmatch 'async function ensureCommentMutationAllowed[\s\S]*?hasPermission\(''comment''\)') {
+  throw 'Deleting comments must require at least comment permission for non-admin users.'
+}
+if ($index -notmatch 'async function openBubbleSettings[\s\S]*?requirePermission\(''full''\)') {
+  throw 'Opening shared bubble settings must require full permission.'
+}
+foreach ($fn in @('addLove', 'addMemory', 'addMemo', 'addSchedule', 'addCountdown', 'addMarker', 'toggleAngryMode', 'saveBubbleSettings', 'addPhotosToBubble')) {
   $pattern = "async function $fn[\s\S]*?requirePermission\('full'\)"
   if ($index -notmatch $pattern) { throw "$fn is missing full-permission enforcement." }
 }
@@ -86,4 +157,4 @@ if ($api -notmatch 'repos/\$\{owner\}/\$\{repo\}/contents') {
   throw 'Upload API should write files through the GitHub contents API.'
 }
 
-Write-Host 'Verification passed: GitHub media upload and traffic optimizations are present.'
+Write-Host 'Verification passed: GitHub media upload, account sync, permissions, and traffic optimizations are present.'

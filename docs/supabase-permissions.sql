@@ -16,6 +16,23 @@ add column if not exists last_active timestamptz;
 alter table public.users
 add column if not exists is_online boolean default false;
 
+-- 3.5. username 必须唯一，否则前端 upsert(onConflict: 'username') 不能可靠同步新账号到其他设备
+do $$
+begin
+  if exists (
+    select username from public.users group by username having count(*) > 1
+  ) then
+    raise exception 'users 表里有重复 username，请先手动删除重复账号后再运行本 SQL';
+  end if;
+
+  if not exists (
+    select 1 from pg_constraint where conname = 'users_username_key'
+  ) then
+    alter table public.users
+    add constraint users_username_key unique (username);
+  end if;
+end $$;
+
 -- 4. 把空值补成默认值
 update public.users
 set permission = 'full'
