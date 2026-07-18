@@ -2178,7 +2178,7 @@
             const defaultUsers = {"boy":{"pwd":"love1314","avatar":"","permission":"full","role":"user"},"girl":{"pwd":"love1314","avatar":"","permission":"full","role":"user"},"admin":{"pwd":"admin123","avatar":"","permission":"full","role":"admin"}};
             let users = defaultUsers;
             try {
-                const { data, error } = await sb.from('users').select('*');
+                const { data, error } = await sb.from('users').select('username,password,avatar,permission,role');
                 if (!error && data && data.length > 0) {
                     let cloudUsers = {};
                     data.forEach(u => {
@@ -2590,7 +2590,7 @@
             const defaultUsers = {"boy":{"pwd":"love1314","avatar":"","permission":"full","role":"user"},"girl":{"pwd":"love1314","avatar":"","permission":"full","role":"user"},"admin":{"pwd":"admin123","avatar":"","permission":"full","role":"admin"}};
             let users = defaultUsers;
             try {
-                const { data, error } = await sb.from('users').select('*');
+                const { data, error } = await sb.from('users').select('username,password,avatar,permission,role');
                 if (error) throw error;
                 let cloudUsers = {};
                 if (data && data.length > 0) {
@@ -2802,35 +2802,45 @@
                 if(btn) { btn.disabled = false; btn.innerText = '登录'; }
             }
         }
+        function runDeferredInitialLoad() {
+            const sharedStateLoads = [
+                () => loadBubbleConfig(),
+                () => loadAngryData()
+            ];
+            let index = 0;
+            const runNext = () => {
+                if (index >= sharedStateLoads.length || !currentUser) return;
+                const task = sharedStateLoads[index++];
+                Promise.resolve()
+                    .then(task)
+                    .catch(e => console.log('延后加载共享状态失败:', e))
+                    .finally(() => setTimeout(runNext, 250));
+            };
+            setTimeout(runNext, 300);
+        }
         function enterMainSystem(username, users) {
             currentUser = username;
+            currentTab = 'message';
             const userInfo = users[username] || {};
             isAdmin = (username === 'admin') || userInfo.role === 'admin';
+            document.getElementById('bubbleLayer').style.display = 'none';
+            document.getElementById('loginPage').style.display = 'none';
+            document.getElementById('mainPage').style.display = 'block';
+            document.getElementById('displayUsername').innerHTML = username==='boy'?'👦 boy':(username==='girl'?'👧 girl':username);
+            const avatar = userInfo.avatar;
+            if(avatar) document.getElementById('userAvatarImg').src = avatar;
+            loadStorageModeSetting();
+            updateTogetherDays();
             updateAdminVisibility();
             updateActivity();
             logAction('login', { username: username });
-            loadAngryData().then(() => {
-                if (document.getElementById('angryMask').style.display === 'flex') return;
-                document.getElementById('bubbleLayer').style.display = 'none';
-                document.getElementById('loginPage').style.display = 'none';
-                document.getElementById('mainPage').style.display = 'block';
-                document.getElementById('displayUsername').innerHTML = username==='boy'?'👦 boy':(username==='girl'?'👧 girl':username);
-                const avatar = userInfo.avatar;
-                if(avatar) document.getElementById('userAvatarImg').src = avatar;
-                loadStorageModeSetting();
-                updateTogetherDays();
-                updateAdminVisibility();
-                Promise.all([
-                    renderMessages(), renderFeeds(), renderLoves(),
-                    renderMemories(), renderMemos(), renderSchedules(),
-                    renderCountdowns(), loadBubbleConfig()
-                ]);
-                startAutoSync();
-                startHeartbeat();
-                setTimeout(updateOnlineStatus, 1000);
-                if (onlineStatusTimer) clearInterval(onlineStatusTimer);
-                onlineStatusTimer = setInterval(updateOnlineStatus, ONLINE_STATUS_INTERVAL_MS);
-            });
+            renderMessages().catch(e => console.log('留言板首屏加载失败:', e));
+            startAutoSync();
+            startHeartbeat();
+            setTimeout(updateOnlineStatus, 1000);
+            if (onlineStatusTimer) clearInterval(onlineStatusTimer);
+            onlineStatusTimer = setInterval(updateOnlineStatus, ONLINE_STATUS_INTERVAL_MS);
+            setTimeout(runDeferredInitialLoad, 800);
         }
         async function openBubbleSettings(){ 
             if (!(await requirePermission('full'))) return;
@@ -2925,6 +2935,8 @@
     </script>
 </body>
 </html>
+
+
 
 
 
