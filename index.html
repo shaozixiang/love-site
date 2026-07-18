@@ -288,6 +288,20 @@
         .admin-btn { background: #ff6b81; color: white; border: none; padding: 4px 10px; border-radius: 20px; cursor: pointer; margin: 2px; font-size: 12px; }
         .admin-btn.danger { background: #ff4757; }
         .admin-btn.success { background: #52c41a; }
+        .qq-sync-panel { background: linear-gradient(135deg, #fff8fb 0%, #fff1f5 100%); border: 1px solid #ffd8e0; box-shadow: 0 8px 24px rgba(255,107,129,0.12); }
+        .qq-sync-hero { display: flex; justify-content: space-between; gap: 16px; align-items: center; flex-wrap: wrap; margin-bottom: 14px; }
+        .qq-sync-title { display: flex; align-items: center; gap: 10px; color: #ff4757; }
+        .qq-sync-title .badge { background: white; color: #ff4757; border: 1px solid #ffd1d8; border-radius: 999px; padding: 4px 10px; font-size: 12px; }
+        .qq-sync-desc { color: #666; font-size: 13px; line-height: 1.7; max-width: 720px; }
+        .qq-sync-actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+        .qq-sync-primary { background: linear-gradient(135deg, #27c2ff 0%, #1e90ff 100%); }
+        .qq-sync-secondary { background: linear-gradient(135deg, #ff9bb0 0%, #ff6b81 100%); }
+        .qq-sync-import { background: linear-gradient(135deg, #8fd16f 0%, #52c41a 100%); }
+        .qq-sync-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin-top: 14px; }
+        .qq-sync-stat { background: rgba(255,255,255,0.82); border: 1px solid #ffe0e5; border-radius: 16px; padding: 12px; }
+        .qq-sync-stat strong { display: block; font-size: 20px; color: #ff4757; margin-bottom: 4px; }
+        .qq-sync-stat span { color: #777; font-size: 12px; }
+        .qq-sync-note { margin-top: 12px; padding: 10px 12px; border-radius: 14px; background: white; color: #777; font-size: 12px; border-left: 4px solid #ffb7c5; }
         .mode-selector { background: #f9f0f2; padding: 15px; border-radius: 20px; margin-bottom: 20px; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 15px; }
         .mode-selector select { padding: 8px 15px; border-radius: 30px; border: 2px solid #ffb7c5; background: white; cursor: pointer; }
         .header { text-align: center; padding: 30px 0 15px; }
@@ -1978,6 +1992,7 @@
                 </tr>`; 
             } 
             html += `</tbody></table></div>`;
+            html += renderQqSyncPanel();
             html += renderAdminSectionShell();
             try { html += await renderAdminLogSection(); } catch(e) {}
             document.getElementById('adminContent').innerHTML = html;
