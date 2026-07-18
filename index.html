@@ -589,6 +589,10 @@
                 if (GITHUB_DIRECT_UPLOAD_TEST_MODE) {
                     return await uploadToGitHubFromBrowser(uploadFile, folder || 'common');
                 }
+                if (window.location.protocol === 'file:') {
+                    alert('本地直接打开不能上传图片：上传接口 /api/upload-to-github 只在 Cloudflare Pages 部署后存在。请部署到线上测试，或临时开启 GITHUB_DIRECT_UPLOAD_TEST_MODE 进行本地直传测试。');
+                    return null;
+                }
                 
                 const formData = new FormData();
                 formData.append('file', uploadFile, uploadFile.name || file.name || 'media');
@@ -687,23 +691,50 @@
         // ========== 实时同步核心机制 ==========
         let syncTimer = null;
         let onlineStatusTimer = null;
-        const AUTO_SYNC_INTERVAL_MS = 60 * 1000;
-        const ONLINE_STATUS_INTERVAL_MS = 60 * 1000;
+        const PAGE_LIMIT = 20;
+        const MAP_LIMIT = 120;
+        const ADMIN_LIMIT = 50;
+        const SECTION_CACHE_MS = 90 * 1000;
+        const AUTO_SYNC_INTERVAL_MS = 5 * 60 * 1000;
+        const ONLINE_STATUS_INTERVAL_MS = 5 * 60 * 1000;
+        const REMOTE_LOG_ACTIONS = new Set([
+            'admin_delete', 'admin_reset_pwd', 'admin_delete_user', 'admin_create_user',
+            'admin_toggle_role', 'admin_set_permission', 'admin_toggle_visibility',
+            'publish_feed', 'publish_message', 'publish_love', 'publish_memory',
+            'publish_memo', 'publish_schedule', 'publish_countdown', 'publish_marker'
+        ]);
+        const sectionLoadedAt = {};
+        function selectUserAuthRows() { return 'username,password,permission,role'; }
+        function selectContentRows(table, columns, options = {}) {
+            let query = sb.from(table).select(columns);
+            if (!isAdmin && !isCoupleAccount()) query = query.or('visibility.is.null,visibility.eq.public');
+            query = query.order(options.orderBy || 'created_at', { ascending: !!options.ascending });
+            return query.limit(options.limit || PAGE_LIMIT);
+        }
+        function shouldUseHeavyMedia(record, url) {
+            const value = String(url || '');
+            const looksInlineOrHuge = value.startsWith('data:') || value.length > 20000;
+            return !looksInlineOrHuge || isAdmin || isCoupleAccount() || normalizeVisibility(record && record.visibility) === 'public';
+        }
+        function shouldReloadSection(sectionName, force = false) {
+            if (force) return true;
+            return Date.now() - (sectionLoadedAt[sectionName] || 0) > SECTION_CACHE_MS;
+        }
+        function markSectionLoaded(sectionName) { sectionLoadedAt[sectionName] = Date.now(); }
         async function refreshCurrentSection() {
             if (!currentUser) return;
             const refreshMap = {
-                message: () => renderMessages(),
-                gallery: () => renderFeeds(),
-                memory: () => renderMemories(),
-                love: () => renderLoves(),
-                memo: () => renderMemos(),
-                todo: async () => { await renderSchedules(); await renderCountdowns(); },
-                angry: () => loadAngryData(),
-                travel: () => loadMarkers()
+                message: (options) => renderMessages(options),
+                gallery: (options) => renderFeeds(options),
+                memory: (options) => renderMemories(options),
+                love: (options) => renderLoves(options),
+                memo: (options) => renderMemos(options),
+                todo: async (options) => { await renderSchedules(options); await renderCountdowns(options); },
+                angry: (options) => loadAngryData(options),
+                travel: (options) => loadMarkers(options)
             };
             const refresh = refreshMap[currentTab] || refreshMap.message;
-            await refresh();
-            if (currentTab === 'message' || currentTab === 'gallery') await loadBubbleConfig();
+            await refresh({ force: false });
         }
         function startAutoSync() {
             if (syncTimer) clearInterval(syncTimer);
@@ -822,10 +853,11 @@
             addDanmaku(`${currentUser=='boy'?'👦 boy':(currentUser=='girl'?'👧 girl':currentUser)} 发布了新动态！`);
         }
         
-        async function renderFeeds() {
+        async function renderFeeds(options = {}) {
+            if (!shouldReloadSection('gallery', options && options.force)) return;
             let feeds = [];
             try {
-                const { data, error } = await sb.from('feeds').select('*').order('created_at', { ascending: false });
+                const { data, error } = await selectContentRows('feeds', 'id,description,author,author_name,created_at,comments,likes,visibility', { limit: PAGE_LIMIT });
                 if (!error && data) {
                     feeds = data.map(f => ({
                         id: f.id, medias: f.medias || [], desc: f.description || '', author: f.author,
@@ -835,6 +867,7 @@
                 }
             } catch(e) {}
             feeds = feeds.filter(canViewRecord);
+            markSectionLoaded('gallery');
             
             if(!feeds.length){ 
                 document.getElementById('galleryContainer').innerHTML='<div class="empty-gallery">✨ 暂无动态，快发第一条朋友圈吧~</div>'; 
@@ -844,15 +877,7 @@
             let html = '';
             for(let feed of feeds) {
                 let canDelete = isAdmin || feed.author === currentUser;
-                let mediaHtml = `<div class="feed-media">`;
-                for(let media of (feed.medias || [])) {
-                    if(media.type === 'video') {
-                        mediaHtml += `<div class="feed-media-item" onclick="openVideoModal('${media.data}')"><video src="${media.data}" preload="metadata" muted playsinline style="pointer-events:none;"></video></div>`;
-                    } else {
-                        mediaHtml += `<div class="feed-media-item" onclick="openImageModal('${media.data}')"><img src="${media.data}" loading="lazy" decoding="async"></div>`;
-                    }
-                }
-                mediaHtml += `</div>`;
+                let mediaHtml = `<div class="feed-media" id="feed_media_${feed.id}"><button class="submit-btn" style="padding:6px 12px;font-size:12px;" onclick="loadFeedMedia('${feed.id}')">Load media</button></div>`;
                 
                 let commentsHtml = `<div class="feed-comments">`;
                 if(feed.comments && feed.comments.length) {
@@ -886,6 +911,26 @@
                 html += `<div class="feed-item"><div class="feed-header"><span class="feed-author">${feed.authorName}</span><span class="feed-time">${feed.time}</span>${canDelete ? `<button class="submit-btn" style="padding:2px 8px;" onclick="deleteFeed('${feed.id}')">删除</button>` : ''}</div>${feed.desc ? `<div class="feed-desc">${escapeHtml(feed.desc)}</div>` : ''}${mediaHtml}${likeHtml}${commentsHtml}</div>`;
             }
             document.getElementById('galleryContainer').innerHTML = html;
+        }
+        async function loadFeedMedia(feedId) {
+            const container = document.getElementById('feed_media_' + feedId);
+            if (!container) return;
+            container.innerHTML = '<div style="color:#999;padding:8px;">Loading media...</div>';
+            try {
+                const { data, error } = await sb.from('feeds').select('medias,visibility').eq('id', feedId).maybeSingle();
+                if (error) throw error;
+                if (!data || !canViewRecord(data)) { container.innerHTML = ''; return; }
+                const medias = (data.medias || []).filter(media => shouldUseHeavyMedia(data, media && media.data));
+                if (!medias.length) { container.innerHTML = '<div style="color:#999;padding:8px;">No media</div>'; return; }
+                let html = '';
+                for (let media of medias) {
+                    if (media.type === 'video') html += `<div class="feed-media-item" onclick="openVideoModal('${media.data}')"><video src="${media.data}" preload="metadata" muted playsinline style="pointer-events:none;"></video></div>`;
+                    else html += `<div class="feed-media-item" onclick="openImageModal('${media.data}')"><img src="${media.data}" loading="lazy" decoding="async"></div>`;
+                }
+                container.innerHTML = html;
+            } catch(e) {
+                container.innerHTML = '<div style="color:#999;padding:8px;">Media load failed</div>';
+            }
         }
         
         async function addFeedComment(feedId, content) { 
@@ -1031,10 +1076,11 @@
             renderMessages(); 
             addDanmaku(`${currentUser=='boy'?'👦 boy':(currentUser=='girl'?'👧 girl':currentUser)} 在留言板说了悄悄话`); 
         }
-        async function renderMessages() { 
+        async function renderMessages(options = {}) { 
+            if (!shouldReloadSection('message', options && options.force)) return;
             let msgs = [];
             try {
-                const { data, error } = await sb.from('messages').select('*').order('created_at', { ascending: false });
+                const { data, error } = await selectContentRows('messages', 'id,content,author,author_name,created_at,comments,likes,visibility', { limit: PAGE_LIMIT });
                 if (!error && data) {
                     msgs = data.map(m => ({
                         id: m.id, content: m.content || '', photo: m.photo, author: m.author,
@@ -1044,6 +1090,7 @@
                 }
             } catch(e) {}
             msgs = msgs.filter(canViewRecord);
+            markSectionLoaded('message');
             
             let html = msgs.map(m => { 
                 let canDelete = isAdmin || m.author === currentUser; 
@@ -1065,7 +1112,7 @@
                     let displayName = u === 'boy' ? '👦 boy' : (u === 'girl' ? '👧 girl' : u);
                     return `<span class="like-user-tag">${displayName}</span>`;
                 }).join('');
-                let msgLikeHtml = `<div class="like-section" style="border-radius:0 0 12px 12px; border-top:none;">
+                let msgLikeHtml = `<div class="like-section" style="padding:0 15px 10px;">
                     <button class="like-btn ${msgHasLiked ? 'liked' : ''}" onclick="toggleMessageLike('${m.id}')">
                         <span class="heart-icon">${msgHasLiked ? '❤️' : '🤍'}</span>
                         <span>${msgHasLiked ? '已赞' : '点赞'}</span>
@@ -1075,10 +1122,26 @@
                         ${msgLikeUsersHtml}
                     </div>
                 </div>`;
-                
-                return `<div class="card-item" style="padding:0;overflow:hidden;"><div style="padding:15px;"><div>💬 ${escapeHtml(m.content)}</div>${m.photo ? `<img src="${m.photo}" loading="lazy" decoding="async" style="max-width:100px;max-height:100px;border-radius:10px;margin-top:8px;cursor:pointer;" onclick="openImageModal('${m.photo}')">` : ''}<div class="card-meta"><span>${m.author_name}</span><span>${m.time}</span>${canDelete ? `<button class="submit-btn" style="padding:2px 8px;" onclick="deleteMsg('${m.id}')">删除</button>` : ''}</div></div>${msgLikeHtml}${commentsHtml}</div>`; 
+                let photoHtml = `<div id="message_photo_${m.id}" style="margin-top:8px;"><button class="submit-btn" style="padding:6px 12px;font-size:12px;" onclick="loadMessagePhoto('${m.id}')">查看图片</button></div>`;
+                return `<div class="card-item" style="padding:0;overflow:hidden;"><div style="padding:15px;"><div>💬 ${escapeHtml(m.content)}</div>${photoHtml}<div class="card-meta"><span>${m.author_name}</span><span>${m.time}</span>${canDelete ? `<button class="submit-btn" style="padding:2px 8px;" onclick="deleteMsg('${m.id}')">删除</button>` : ''}</div></div>${msgLikeHtml}${commentsHtml}</div>`; 
             }).join(''); 
-            document.getElementById('messageList').innerHTML = html || '暂无留言'; 
+            document.getElementById('messageList').innerHTML = html || '<div class="empty-gallery">还没有留言，写下第一句吧~</div>'; 
+        }
+        async function loadMessagePhoto(msgId) {
+            const container = document.getElementById('message_photo_' + msgId);
+            if (!container) return;
+            container.innerHTML = '<span style="color:#999;font-size:12px;">Loading image...</span>';
+            try {
+                const { data, error } = await sb.from('messages').select('photo,visibility').eq('id', msgId).maybeSingle();
+                if (error) throw error;
+                if (!data || !data.photo || !canViewRecord(data) || !shouldUseHeavyMedia(data, data.photo)) {
+                    container.innerHTML = '<span style="color:#999;font-size:12px;">No image</span>';
+                    return;
+                }
+                container.innerHTML = `<img src="${data.photo}" loading="lazy" decoding="async" style="max-width:100px;max-height:100px;border-radius:10px;margin-top:8px;cursor:pointer;" onclick="openImageModal('${data.photo}')">`;
+            } catch(e) {
+                container.innerHTML = '<span style="color:#999;font-size:12px;">Image load failed</span>';
+            }
         }
         async function addMsgComment(msgId, content) {
             if (!(await requirePermission('comment'))) return;
@@ -1196,15 +1259,17 @@
             renderLoves(); 
             addDanmaku(`${currentUser=='boy'?'👦 boy':(currentUser=='girl'?'👧 girl':currentUser)} 记录了感动的话`); 
         }
-        async function renderLoves() { 
+        async function renderLoves(options = {}) {
+            if (!shouldReloadSection('love', options && options.force)) return; 
             let loves = [];
             try {
-                const { data, error } = await sb.from('loves').select('*').order('created_at', { ascending: false });
+                const { data, error } = await selectContentRows('loves', 'id,content,author,author_name,created_at,privacy,visibility', { limit: PAGE_LIMIT });
                 if (!error && data) {
                     loves = data.map(l => ({ id: l.id, content: l.content, author: l.author, authorName: l.author_name, time: new Date(l.created_at).toLocaleString(), privacy: l.privacy, visibility: normalizeVisibility(l.visibility) }));
                 }
             } catch(e) {}
             loves = loves.filter(canViewRecord);
+            markSectionLoaded('love');
             
             let html = loves.map(l => { 
                 if(l.privacy === 'private' && l.author !== currentUser && !isAdmin) return ''; 
@@ -1234,15 +1299,17 @@
             renderMemories(); 
             addDanmaku(`${currentUser=='boy'?'👦 boy':(currentUser=='girl'?'👧 girl':currentUser)} 完成了新打卡`); 
         }
-        async function renderMemories(){ 
+        async function renderMemories(options = {}) {
+            if (!shouldReloadSection('memory', options && options.force)) return; 
             let mem = [];
             try {
-                const { data, error } = await sb.from('memories').select('*').order('created_at', { ascending: false });
+                const { data, error } = await selectContentRows('memories', 'id,content,author,author_name,created_at,visibility', { limit: PAGE_LIMIT });
                 if (!error && data) {
                     mem = data.map(m => ({ id: m.id, content: m.content, author: m.author, authorName: m.author_name, time: new Date(m.created_at).toLocaleString(), visibility: normalizeVisibility(m.visibility) }));
                 }
             } catch(e) {}
             mem = mem.filter(canViewRecord);
+            markSectionLoaded('memory');
             
             let html=mem.map(m=>{ 
                 let canDelete = isAdmin || m.author === currentUser; 
@@ -1281,10 +1348,11 @@
             addDanmaku(`${currentUser=='boy'?'👦 boy':(currentUser=='girl'?'👧 girl':currentUser)} 添加了待办事项`);
         }
         
-        async function renderMemos() {
+        async function renderMemos(options = {}) {
+            if (!shouldReloadSection('memo', options && options.force)) return;
             let memos = [];
             try {
-                const { data, error } = await sb.from('memos').select('*').order('created_at', { ascending: false });
+                const { data, error } = await selectContentRows('memos', 'id,content,priority,done,author,author_name,created_at,visibility', { limit: PAGE_LIMIT });
                 if (!error && data) {
                     memos = data.map(m => ({
                         id: m.id, content: m.content, priority: m.priority || 'normal',
@@ -1294,6 +1362,7 @@
                 }
             } catch(e) {}
             memos = memos.filter(canViewRecord);
+            markSectionLoaded('memo');
             
             let priorityColors = { normal: '#999', important: '#faad14', urgent: '#ff4757' };
             let priorityLabels = { normal: '普通', important: '重要', urgent: '紧急' };
@@ -1339,15 +1408,17 @@
             addDanmaku(`${currentUser=='boy'?'👦 boy':(currentUser=='girl'?'👧 girl':currentUser)} 添加了新行程`); 
         }
         
-        async function renderSchedules() { 
+        async function renderSchedules(options = {}) {
+            if (!shouldReloadSection('todo-schedules', options && options.force)) return; 
             let schedules = [];
             try {
-                const { data, error } = await sb.from('schedules').select('*').order('created_at', { ascending: false });
+                const { data, error } = await selectContentRows('schedules', 'id,start_date,end_date,title,author,author_name,created_at,visibility', { limit: PAGE_LIMIT });
                 if (!error && data) {
                     schedules = data.map(s => ({ id: s.id, start: s.start_date, end: s.end_date, title: s.title, author: s.author, authorName: s.author_name, time: new Date(s.created_at).toLocaleString(), visibility: normalizeVisibility(s.visibility) }));
                 }
             } catch(e) {}
             schedules = schedules.filter(canViewRecord);
+            markSectionLoaded('todo-schedules');
             
             let html = schedules.map(s => { 
                 let canDelete = isAdmin || s.author === currentUser; 
@@ -1385,15 +1456,17 @@
             addDanmaku(`${currentUser=='boy'?'👦 boy':(currentUser=='girl'?'👧 girl':currentUser)} 添加了纪念日`); 
         }
         
-        async function renderCountdowns() { 
+        async function renderCountdowns(options = {}) {
+            if (!shouldReloadSection('todo-countdowns', options && options.force)) return; 
             let countdowns = [];
             try {
-                const { data, error } = await sb.from('countdowns').select('*').order('created_at', { ascending: false });
+                const { data, error } = await selectContentRows('countdowns', 'id,name,target_date,author,author_name,created_at,visibility', { limit: PAGE_LIMIT });
                 if (!error && data) {
                     countdowns = data.map(c => ({ id: c.id, name: c.name, date: c.target_date, author: c.author, authorName: c.author_name, time: new Date(c.created_at).toLocaleString(), visibility: normalizeVisibility(c.visibility) }));
                 }
             } catch(e) {}
             countdowns = countdowns.filter(canViewRecord);
+            markSectionLoaded('todo-countdowns');
             
             let today = new Date(); 
             today.setHours(0,0,0,0); 
@@ -1426,10 +1499,11 @@
                 if(name) addMarker(e.latlng.lat, e.latlng.lng, name); 
             }); 
         }
-        async function loadMarkers() { 
+        async function loadMarkers(options = {}) { 
+            if (!shouldReloadSection('travel', options && options.force)) return;
             markers = [];
             try {
-                const { data, error } = await sb.from('travel_markers').select('*').order('created_at', { ascending: true });
+                const { data, error } = await selectContentRows('travel_markers', 'id,lat,lng,name,description,author,author_name,created_at,visibility', { ascending: true, limit: MAP_LIMIT });
                 if (!error && data) {
                     markers = data.map(m => ({
                         id: m.id, lat: m.lat, lng: m.lng, name: m.name, 
@@ -1439,6 +1513,7 @@
                 }
             } catch(e) {}
             markers = markers.filter(canViewRecord);
+            markSectionLoaded('travel');
             
             if(map) {
                 map.eachLayer(layer => { if(layer instanceof L.Marker) map.removeLayer(layer); });
@@ -1490,7 +1565,7 @@
         async function toggleAngryMode(){ 
             if (!(await requirePermission('full'))) return;
             try {
-                const { data } = await sb.from('angry_mode').select('*').limit(1).single();
+                const { data } = await sb.from('angry_mode').select('id,enabled,by').limit(1).single();
                 let mode = data || { enabled: false, by: '' };
                 
                 if(mode.enabled){ 
@@ -1531,10 +1606,10 @@
             let ap = [];
             
             try {
-                const { data: modeData } = await sb.from('angry_mode').select('*').limit(1).single();
+                const { data: modeData } = await sb.from('angry_mode').select('id,enabled,by').limit(1).single();
                 if (modeData) mode = modeData;
                 
-                const { data: apData } = await sb.from('apologies').select('*').order('created_at', { ascending: false });
+                const { data: apData } = await sb.from('apologies').select('id,content,author,author_name,created_at,status').order('created_at', { ascending: false }).limit(PAGE_LIMIT);
                 if (apData) ap = apData.map(a => ({
                     id: a.id, content: a.content, from: a.author, 
                     fromName: a.author_name, time: new Date(a.created_at).toLocaleString(), 
@@ -1612,17 +1687,17 @@
             loadAngryData(); 
         }
         // ========== 气泡池 ==========
-        async function loadBubbleConfig(){ 
+        async function loadBubbleConfig(options = {}){ 
+            const loadPhotos = options.loadPhotos === true;
             try {
-                const { data: configData } = await sb.from('bubble_config').select('*').limit(1).maybeSingle();
+                const { data: configData } = await sb.from('bubble_config').select('id,enabled,interval').limit(1).maybeSingle();
                 if (configData) {
                     bubbleEnabled = configData.enabled !== undefined ? configData.enabled : true;
                     bubbleIntervalSec = configData.interval || 12;
                 }
-                
-                const { data: photosData, error } = await sb.from('bubble_photos').select('*');
-                if (!error && photosData) {
-                    floatPhotos = photosData.map(p => ({ dataUrl: p.photo_url, id: p.id }));
+                if (loadPhotos) {
+                    const { data: photosData, error } = await sb.from('bubble_photos').select('id,photo_url').limit(100);
+                    if (!error && photosData) floatPhotos = photosData.map(p => ({ dataUrl: p.photo_url, id: p.id }));
                 }
             } catch(e) {
                 let s=localStorage.getItem('couple_float_photos'); 
@@ -1633,16 +1708,19 @@
                     bubbleIntervalSec=c.interval||12; 
                 }
             }
-            
             updateToggleUI(); 
             document.getElementById('bubbleInterval').value=bubbleIntervalSec; 
-            renderBubblePreview(); 
+            if (loadPhotos) renderBubblePreview(); 
             if(bubbleEnabled && floatPhotos.length && document.getElementById('mainPage').style.display==='block') startBubbleGenerator(); 
             else stopBubbleGenerator(); 
         }
+        async function ensureBubblePhotosLoaded() {
+            if (floatPhotos.length) return;
+            await loadBubbleConfig({ loadPhotos: true });
+        }
         async function saveBubbleConfig(){ 
             try {
-                const { data } = await sb.from('bubble_config').select('*').limit(1).single();
+                const { data } = await sb.from('bubble_config').select('id').limit(1).single();
                 if (data && data.id) {
                     await sb.from('bubble_config').update({ enabled: bubbleEnabled, interval: bubbleIntervalSec }).eq('id', data.id);
                 } else {
@@ -1687,7 +1765,7 @@
                     } catch(e) {}
                 }
             }
-            loadBubbleConfig();
+            loadBubbleConfig({ loadPhotos: true });
         }
         async function saveBubbleSettings(){ 
             if (!(await requirePermission('full'))) return;
@@ -1825,7 +1903,7 @@
         async function updateOnlineStatus() {
             if (!currentUser || currentUser === 'admin') return;
             try {
-                const { data } = await sb.from('users').select('*');
+                const { data } = await sb.from('users').select('username,last_active,is_online');
                 if (!data) return;
                 
                 let targetUsername = currentUser === 'boy' ? 'girl' : (currentUser === 'girl' ? 'boy' : null);
@@ -1865,6 +1943,7 @@
         
         // ========== 后台管理模块 ==========
         async function renderAdminData() { 
+            const defaultContentType = 'message';
             let html = '';
             html += `<div class="admin-section"><h3>👥 用户管理 · 权限设置</h3><table class="data-table"><thead><tr><th>账号</th><th>密码</th><th>角色</th><th>权限</th><th>操作</th></tr></thead><tbody>`; 
             let users = await loadUserData();
@@ -1898,9 +1977,14 @@
                 </tr>`; 
             } 
             html += `</tbody></table></div>`;
+            html += renderAdminSectionShell();
+            try { html += await renderAdminLogSection(); } catch(e) {}
+            document.getElementById('adminContent').innerHTML = html;
+            setTimeout(() => renderAdminContentSection(defaultContentType, { skipAdminCheck: true }), 0);
+            return;
             
             try {
-                const { data: feeds } = await sb.from('feeds').select('*').order('created_at', { ascending: false });
+                const { data: feeds } = await sb.from('feeds').select('id,description,author_name,created_at,visibility').order('created_at', { ascending: false }).limit(ADMIN_LIMIT);
                 html += `<div class="admin-section"><h3>📸 时光相册动态 (${feeds ? feeds.length : 0}条)</h3><table class="data-table"><thead><tr><th>描述</th><th>作者</th><th>时间</th><th>可见性</th><th>操作</th></tr></thead><tbody>`; 
                 if (feeds) for(let f of feeds) { 
                     html += `<tr><td>${escapeHtml(f.description || '').substring(0,30)}</td><td>${f.author_name}</td><td>${new Date(f.created_at).toLocaleString()}</td><td>${renderVisibilityAdminControls('feed', f.id, f.visibility)}</td><td><button class="admin-btn danger" onclick="deleteFeed('${f.id}')">删除</button></td></tr>`; 
@@ -1910,7 +1994,7 @@
             
             // 💬 留言板管理
             try {
-                const { data: messages } = await sb.from('messages').select('*').order('created_at', { ascending: false });
+                const { data: messages } = await sb.from('messages').select('id,content,author_name,created_at,visibility').order('created_at', { ascending: false }).limit(ADMIN_LIMIT);
                 html += `<div class="admin-section"><h3>💬 留言板 (${messages ? messages.length : 0}条)</h3><table class="data-table"><thead><tr><th>内容</th><th>作者</th><th>时间</th><th>可见性</th><th>操作</th></tr></thead><tbody>`;
                 if (messages) for(let m of messages) {
                     html += `<tr><td>${escapeHtml(m.content || '').substring(0,30)}</td><td>${m.author_name}</td><td>${new Date(m.created_at).toLocaleString()}</td><td>${renderVisibilityAdminControls('message', m.id, m.visibility)}</td><td><button class="admin-btn danger" onclick="adminDelete('message', '${m.id}')">删除</button></td></tr>`;
@@ -1920,7 +2004,7 @@
             
             // 💌 感动的话管理
             try {
-                const { data: loves } = await sb.from('loves').select('*').order('created_at', { ascending: false });
+                const { data: loves } = await sb.from('loves').select('id,content,author_name,privacy,created_at,visibility').order('created_at', { ascending: false }).limit(ADMIN_LIMIT);
                 html += `<div class="admin-section"><h3>💌 感动的话 (${loves ? loves.length : 0}条)</h3><table class="data-table"><thead><tr><th>内容</th><th>作者</th><th>隐私</th><th>时间</th><th>可见性</th><th>操作</th></tr></thead><tbody>`;
                 if (loves) for(let l of loves) {
                     html += `<tr><td>${escapeHtml(l.content || '').substring(0,30)}</td><td>${l.author_name}</td><td>${l.privacy === 'private' ? '🔒 私密' : '公开'}</td><td>${new Date(l.created_at).toLocaleString()}</td><td>${renderVisibilityAdminControls('love', l.id, l.visibility)}</td><td><button class="admin-btn danger" onclick="adminDelete('love', '${l.id}')">删除</button></td></tr>`;
@@ -1930,7 +2014,7 @@
             
             // ✨ 一起做过的事管理
             try {
-                const { data: memories } = await sb.from('memories').select('*').order('created_at', { ascending: false });
+                const { data: memories } = await sb.from('memories').select('id,content,author_name,created_at,visibility').order('created_at', { ascending: false }).limit(ADMIN_LIMIT);
                 html += `<div class="admin-section"><h3>✨ 一起做过的事 (${memories ? memories.length : 0}条)</h3><table class="data-table"><thead><tr><th>内容</th><th>作者</th><th>时间</th><th>可见性</th><th>操作</th></tr></thead><tbody>`;
                 if (memories) for(let mem of memories) {
                     html += `<tr><td>${escapeHtml(mem.content || '').substring(0,30)}</td><td>${mem.author_name}</td><td>${new Date(mem.created_at).toLocaleString()}</td><td>${renderVisibilityAdminControls('memory', mem.id, mem.visibility)}</td><td><button class="admin-btn danger" onclick="adminDelete('memory', '${mem.id}')">删除</button></td></tr>`;
@@ -1940,7 +2024,7 @@
             
             // 📋 待办备忘录管理
             try {
-                const { data: memos } = await sb.from('memos').select('*').order('created_at', { ascending: false });
+                const { data: memos } = await sb.from('memos').select('id,content,author_name,priority,done,created_at,visibility').order('created_at', { ascending: false }).limit(ADMIN_LIMIT);
                 html += `<div class="admin-section"><h3>📋 待办备忘录 (${memos ? memos.length : 0}条)</h3><table class="data-table"><thead><tr><th>内容</th><th>作者</th><th>优先级</th><th>状态</th><th>可见性</th><th>操作</th></tr></thead><tbody>`;
                 if (memos) for(let memo of memos) {
                     const priorityLabels = { high: '🔴 高', medium: '🟡 中', low: '🟢 低' };
@@ -1951,7 +2035,7 @@
             
             // 📝 行程管理
             try {
-                const { data: schedules } = await sb.from('schedules').select('*').order('created_at', { ascending: false });
+                const { data: schedules } = await sb.from('schedules').select('id,title,start_date,end_date,author_name,created_at,visibility').order('created_at', { ascending: false }).limit(ADMIN_LIMIT);
                 html += `<div class="admin-section"><h3>📝 行程安排 (${schedules ? schedules.length : 0}条)</h3><table class="data-table"><thead><tr><th>标题</th><th>日期</th><th>作者</th><th>可见性</th><th>操作</th></tr></thead><tbody>`;
                 if (schedules) for(let s of schedules) {
                     let dateRange = s.start_date ? (s.end_date ? `${s.start_date} ~ ${s.end_date}` : s.start_date) : '';
@@ -1962,7 +2046,7 @@
             
             // ⏰ 纪念日倒计时管理
             try {
-                const { data: countdowns } = await sb.from('countdowns').select('*').order('created_at', { ascending: false });
+                const { data: countdowns } = await sb.from('countdowns').select('id,name,target_date,author_name,created_at,visibility').order('created_at', { ascending: false }).limit(ADMIN_LIMIT);
                 html += `<div class="admin-section"><h3>⏰ 纪念日倒计时 (${countdowns ? countdowns.length : 0}条)</h3><table class="data-table"><thead><tr><th>标题</th><th>目标日期</th><th>作者</th><th>可见性</th><th>操作</th></tr></thead><tbody>`;
                 if (countdowns) for(let c of countdowns) {
                     html += `<tr><td>${escapeHtml(c.name || '').substring(0,20)}</td><td>${c.target_date || ''}</td><td>${c.author_name}</td><td>${renderVisibilityAdminControls('countdown', c.id, c.visibility)}</td><td><button class="admin-btn danger" onclick="adminDelete('countdown', '${c.id}')">删除</button></td></tr>`;
@@ -1972,7 +2056,7 @@
             
             // 🗺️ 旅行地图标记管理
             try {
-                const { data: markers } = await sb.from('travel_markers').select('*').order('created_at', { ascending: false });
+                const { data: markers } = await sb.from('travel_markers').select('id,name,description,author_name,created_at,visibility').order('created_at', { ascending: false }).limit(ADMIN_LIMIT);
                 html += `<div class="admin-section"><h3>🗺️ 旅行地图标记 (${markers ? markers.length : 0}个)</h3><table class="data-table"><thead><tr><th>名称</th><th>描述</th><th>作者</th><th>可见性</th><th>操作</th></tr></thead><tbody>`;
                 if (markers) for(let mk of markers) {
                     html += `<tr><td>${escapeHtml(mk.name || '').substring(0,15)}</td><td>${escapeHtml(mk.description || '').substring(0,20)}</td><td>${mk.author_name}</td><td>${renderVisibilityAdminControls('marker', mk.id, mk.visibility)}</td><td><button class="admin-btn danger" onclick="adminDelete('marker', '${mk.id}')">删除</button></td></tr>`;
@@ -2051,6 +2135,80 @@
             document.getElementById('adminContent').innerHTML = html; 
         }
         
+        function renderAdminSectionShell() {
+            const sections = [
+                ['feed', '📸 时光相册'], ['message', '💬 留言板'], ['love', '💌 感动的话'], ['memory', '✨ 一起做过的事'],
+                ['memo', '📋 待办备忘录'], ['schedule', '📝 行程安排'], ['countdown', '⏰ 纪念日倒计时'], ['marker', '🗺️ 旅行地图']
+            ];
+            return `<div class="admin-section"><h3>📦 内容管理 · 按需加载</h3><div style="display:flex;gap:8px;flex-wrap:wrap;">${sections.map(([type, label]) => `<button class="admin-btn" onclick="renderAdminContentSection('${type}')">${label}</button>`).join('')}</div><div id="adminContentSection" style="margin-top:12px;color:#888;">选择一个分类后再加载对应内容，避免后台一次拉取全部数据。</div></div>`;
+        }
+        
+        function renderAdminRows(type, rows) {
+            if (!rows || rows.length === 0) return '<tr><td colspan="6" style="text-align:center;color:#999;padding:20px;">暂无数据</td></tr>'; 
+            return rows.map(row => {
+                const time = row.created_at ? new Date(row.created_at).toLocaleString() : ''; 
+                if (type === 'feed') return `<tr><td>${escapeHtml(row.description || '').substring(0,30)}</td><td>${row.author_name || ''}</td><td>${time}</td><td>${renderVisibilityAdminControls('feed', row.id, row.visibility)}</td><td><button class="admin-btn danger" onclick="deleteFeed('${row.id}')">删除</button></td></tr>`;
+                if (type === 'message') return `<tr><td>${escapeHtml(row.content || '').substring(0,30)}</td><td>${row.author_name || ''}</td><td>${time}</td><td>${renderVisibilityAdminControls('message', row.id, row.visibility)}</td><td><button class="admin-btn danger" onclick="adminDelete('message', '${row.id}')">删除</button></td></tr>`;
+                if (type === 'love') return `<tr><td>${escapeHtml(row.content || '').substring(0,30)}</td><td>${row.author_name || ''}</td><td>${row.privacy === 'private' ? '🔒 私密' : '公开'}</td><td>${time}</td><td>${renderVisibilityAdminControls('love', row.id, row.visibility)}</td><td><button class="admin-btn danger" onclick="adminDelete('love', '${row.id}')">删除</button></td></tr>`;
+                if (type === 'memory') return `<tr><td>${escapeHtml(row.content || '').substring(0,30)}</td><td>${row.author_name || ''}</td><td>${time}</td><td>${renderVisibilityAdminControls('memory', row.id, row.visibility)}</td><td><button class="admin-btn danger" onclick="adminDelete('memory', '${row.id}')">删除</button></td></tr>`;
+                if (type === 'memo') { const priorityLabels = { high: '🔴 高', medium: '🟡 中', low: '🟢 低' }; return `<tr><td>${escapeHtml(row.content || '').substring(0,30)}</td><td>${row.author_name || ''}</td><td>${priorityLabels[row.priority] || row.priority || ''}</td><td>${row.done ? '✅ 已完成' : '⏳ 进行中'}</td><td>${renderVisibilityAdminControls('memo', row.id, row.visibility)}</td><td><button class="admin-btn danger" onclick="adminDelete('memo', '${row.id}')">删除</button></td></tr>`; }
+                if (type === 'schedule') { const dateRange = row.start_date ? (row.end_date ? `${row.start_date} ~ ${row.end_date}` : row.start_date) : ''; return `<tr><td>${escapeHtml(row.title || '').substring(0,20)}</td><td>${dateRange}</td><td>${row.author_name || ''}</td><td>${renderVisibilityAdminControls('schedule', row.id, row.visibility)}</td><td><button class="admin-btn danger" onclick="adminDelete('schedule', '${row.id}')">删除</button></td></tr>`; }
+                if (type === 'countdown') return `<tr><td>${escapeHtml(row.name || '').substring(0,20)}</td><td>${row.target_date || ''}</td><td>${row.author_name || ''}</td><td>${renderVisibilityAdminControls('countdown', row.id, row.visibility)}</td><td><button class="admin-btn danger" onclick="adminDelete('countdown', '${row.id}')">删除</button></td></tr>`;
+                if (type === 'marker') return `<tr><td>${escapeHtml(row.name || '').substring(0,15)}</td><td>${escapeHtml(row.description || '').substring(0,20)}</td><td>${row.author_name || ''}</td><td>${renderVisibilityAdminControls('marker', row.id, row.visibility)}</td><td><button class="admin-btn danger" onclick="adminDelete('marker', '${row.id}')">删除</button></td></tr>`;
+                return '';
+            }).join('');
+        }
+        
+        async function renderAdminContentSection(type, options = {}) {
+            if (!options.skipAdminCheck && !(await requireAdmin())) return;
+            const target = document.getElementById('adminContentSection');
+            if (!target) return;
+            target.innerHTML = '<div style="color:#888;padding:12px;">正在加载...</div>'; 
+            const configs = {
+                feed: { title: '📸 时光相册动态', table: 'feeds', cols: 'id,description,author_name,created_at,visibility', headers: ['描述','作者','时间','可见性','操作'] },
+                message: { title: '💬 留言板', table: 'messages', cols: 'id,content,author_name,created_at,visibility', headers: ['内容','作者','时间','可见性','操作'] },
+                love: { title: '💌 感动的话', table: 'loves', cols: 'id,content,author_name,privacy,created_at,visibility', headers: ['内容','作者','隐私','时间','可见性','操作'] },
+                memory: { title: '✨ 一起做过的事', table: 'memories', cols: 'id,content,author_name,created_at,visibility', headers: ['内容','作者','时间','可见性','操作'] },
+                memo: { title: '📋 待办备忘录', table: 'memos', cols: 'id,content,author_name,priority,done,created_at,visibility', headers: ['内容','作者','优先级','状态','可见性','操作'] },
+                schedule: { title: '📝 行程安排', table: 'schedules', cols: 'id,title,start_date,end_date,author_name,created_at,visibility', headers: ['标题','日期','作者','可见性','操作'] },
+                countdown: { title: '⏰ 纪念日倒计时', table: 'countdowns', cols: 'id,name,target_date,author_name,created_at,visibility', headers: ['标题','目标日期','作者','可见性','操作'] },
+                marker: { title: '🗺️ 旅行地图标记', table: 'travel_markers', cols: 'id,name,description,author_name,created_at,visibility', headers: ['名称','描述','作者','可见性','操作'] }
+            };
+            const config = configs[type];
+            if (!config) { target.innerHTML = '<div style="color:#c00;padding:12px;">未知分类</div>'; return; }
+            try {
+                const { data, error } = await sb.from(config.table).select(config.cols).order('created_at', { ascending: false }).limit(ADMIN_LIMIT);
+                if (error) throw error;
+                const headerHtml = config.headers.map(h => `<th>${h}</th>`).join('');
+                target.innerHTML = `<h3>${config.title} (${data ? data.length : 0}条，最多显示${ADMIN_LIMIT}条)</h3><div style="overflow-x:auto;"><table class="data-table"><thead><tr>${headerHtml}</tr></thead><tbody>${renderAdminRows(type, data || [])}</tbody></table></div>`;
+            } catch(e) {
+                target.innerHTML = `<div style="color:#c00;padding:12px;">加载失败：${escapeHtml(e.message || String(e))}</div>`;
+            }
+        }
+        
+        async function renderAdminLogSection() {
+            const logs = await getAdminLogs();
+            const actionLabels = {
+                login: '🔐 用户登录', logout: '🚪 用户登出', login_failed: '❌ 登录失败', publish_feed: '📸 发布相册', publish_message: '💬 发布留言',
+                publish_love: '💌 发布感动', publish_memory: '✨ 添加回忆', publish_memo: '📋 添加待办', publish_schedule: '📝 添加行程',
+                publish_countdown: '⏰ 添加纪念日', publish_marker: '🗺️ 添加地图标记', admin_delete: '🔧 管理员删除',
+                admin_reset_pwd: '🔧 管理员重置密码', admin_delete_user: '🔧 管理员删除账号', admin_create_user: '🔧 管理员创建账号',
+                admin_toggle_role: '🔧 切换用户角色', admin_set_permission: '🔧 设置用户权限', admin_toggle_visibility: '🔒 切换对外可见性'
+            };
+            let rows = ''; 
+            if (logs && logs.length > 0) {
+                for (let log of logs.slice(0, ADMIN_LIMIT)) {
+                    let details = ''; 
+                    try { const parsed = JSON.parse(log.details); details = Object.entries(parsed).map(([k, v]) => `${k}: ${String(v).substring(0, 20)}`).join(', '); }
+                    catch(e) { details = log.details ? String(log.details).substring(0, 30) : ''; }
+                    rows += `<tr><td style="font-size:11px;white-space:nowrap;">${new Date(log.created_at).toLocaleString()}</td><td>${log.user}</td><td>${actionLabels[log.action] || log.action}</td><td style="font-size:11px;color:#666;">${escapeHtml(details)}</td></tr>`;
+                }
+            } else {
+                rows = '<tr><td colspan="4" style="text-align:center;color:#999;padding:20px;">暂无日志记录</td></tr>'; 
+            }
+            return `<div class="admin-section"><h3>📋 操作日志 (${logs ? logs.length : 0}条)</h3><div style="max-height:400px;overflow-y:auto;"><table class="data-table"><thead><tr><th>时间</th><th>用户</th><th>操作</th><th>详情</th></tr></thead><tbody>${rows}</tbody></table></div></div>`;
+        }
+        
         // ========== 管理后台通用删除函数 ==========
         async function adminDelete(type, id) {
             if (!confirm('确定要删除这条数据吗？')) return;
@@ -2096,13 +2254,14 @@
         }
         function buildUserRow(username, info = {}) {
             const normalized = normalizeUserInfo(username, info);
-            return {
+            const row = {
                 username,
                 password: normalized.pwd,
-                avatar: normalized.avatar,
                 permission: normalized.permission,
                 role: normalized.role
             };
+            if (normalized.avatar) row.avatar = normalized.avatar;
+            return row;
         }
         function getCacheSafeUsers(users) {
             const normalized = normalizeUsers(users);
@@ -2180,10 +2339,8 @@
                 }
                 
                 // 异步尝试存到 Supabase（不阻塞）
-                try {
-                    await sb.from('admin_logs').insert(logData);
-                } catch(e) {
-                    // 表不存在或其他错误，忽略，已经存本地了
+                if (REMOTE_LOG_ACTIONS.has(action)) {
+                    try { await sb.from('admin_logs').insert(logData); } catch(e) {}
                 }
             } catch(e) {
                 console.error('记录日志失败:', e);
@@ -2196,7 +2353,7 @@
             
             // 尝试从 Supabase 获取
             try {
-                const { data, error } = await sb.from('admin_logs').select('*').order('created_at', { ascending: false }).limit(100);
+                const { data, error } = await sb.from('admin_logs').select('action,user,details,created_at').order('created_at', { ascending: false }).limit(ADMIN_LIMIT);
                 if (!error && data) {
                     logs = data;
                 }
@@ -2348,9 +2505,7 @@
             document.querySelectorAll('.section').forEach(sec => sec.classList.remove('active')); 
             document.getElementById(sectionName + 'Section').classList.add('active'); 
             document.querySelectorAll('.nav-btn').forEach(btn => btn.classList.remove('active')); 
-            document.querySelector(`.nav-btn[data-section="${sectionName}"]`).classList.add('active'); 
-            // 记录切换标签页日志
-            logAction('switch_tab', { from: currentTab || 'unknown', to: sectionName });
+            document.querySelector(`.nav-btn[data-section="${sectionName}"]`).classList.add('active');
             currentTab = sectionName;
             refreshCurrentSection().catch(e => console.log('切换页面刷新出现微调')); 
             if(sectionName === 'travel') setTimeout(() => initMap(), 100); 
@@ -2401,7 +2556,8 @@
                 const { error } = await sb.from(table).update({ visibility: nextVisibility }).eq('id', id);
                 if (error) throw error;
                 logAction('admin_toggle_visibility', { type, id, visibility: nextVisibility });
-                renderAdminData();
+                if (document.getElementById('adminContentSection')) renderAdminContentSection(type);
+                else renderAdminData();
                 refreshCurrentSection().catch(e => console.log('可见性切换后刷新当前页面失败:', e));
             } catch(e) {
                 alert('切换可见性失败：请先在 Supabase 执行 docs/supabase-visibility.sql。错误：' + e.message);
@@ -2452,19 +2608,26 @@
             const adminBtn = document.getElementById('adminEntryBtn');
             if (adminBtn) adminBtn.style.display = isAdmin ? 'block' : 'none';
         }
+        async function loadCurrentUserAvatar() {
+            if (!currentUser) return;
+            try {
+                const { data, error } = await sb.from('users').select('avatar').eq('username', currentUser).maybeSingle();
+                if (!error && data && data.avatar) document.getElementById('userAvatarImg').src = data.avatar;
+            } catch(e) {}
+        }
         async function forceRefreshUserData(options = {}) {
             const allowLocalFallback = options.allowLocalFallback !== false;
             const defaultUsers = {"boy":{"pwd":"love1314","avatar":"","permission":"full","role":"user"},"girl":{"pwd":"love1314","avatar":"","permission":"full","role":"user"},"admin":{"pwd":"admin123","avatar":"","permission":"full","role":"admin"}};
             let users = defaultUsers;
             try {
-                const { data, error } = await sb.from('users').select('username,password,avatar,permission,role');
+                const { data, error } = await sb.from('users').select(selectUserAuthRows());
                 if (error) throw error;
                 let cloudUsers = {};
                 if (data && data.length > 0) {
                     data.forEach(u => {
                         cloudUsers[u.username] = normalizeUserInfo(u.username, {
                             pwd: u.password,
-                            avatar: u.avatar || '',
+                            avatar: '',
                             permission: u.permission || 'full',
                             role: u.role || (u.username === 'admin' ? 'admin' : 'user')
                         });
@@ -2641,12 +2804,20 @@
             } catch(e) {
                 localStorage.removeItem('couple_logged_user');
                 console.warn('自动登录失败，需要重新登录:', e);
-                document.getElementById('bubbleLayer').style.display = 'none';
                 document.getElementById('mainPage').style.display = 'none';
                 document.getElementById('loginPage').style.display = 'flex';
                 updateAdminVisibility();
             }
             return false;
+        }
+        async function unlockEntryGate() {
+            document.getElementById('bubbleLayer').style.display = 'none';
+            document.getElementById('mainPage').style.display = 'none';
+            document.getElementById('loginPage').style.display = 'flex';
+            const restored = await autoLogin();
+            if (!restored) {
+                document.getElementById('loginPage').style.display = 'flex';
+            }
         }
         async function login(){ 
             const u = document.getElementById('username').value.trim(); 
@@ -2671,7 +2842,7 @@
         }
         function runDeferredInitialLoad() {
             const sharedStateLoads = [
-                () => loadBubbleConfig(),
+                () => loadBubbleConfig({ loadPhotos: false }),
                 () => loadAngryData()
             ];
             let index = 0;
@@ -2694,14 +2865,13 @@
             document.getElementById('loginPage').style.display = 'none';
             document.getElementById('mainPage').style.display = 'block';
             document.getElementById('displayUsername').innerHTML = username==='boy'?'👦 boy':(username==='girl'?'👧 girl':username);
-            const avatar = userInfo.avatar;
-            if(avatar) document.getElementById('userAvatarImg').src = avatar;
+            loadCurrentUserAvatar();
             loadStorageModeSetting();
             updateTogetherDays();
             updateAdminVisibility();
             updateActivity();
             logAction('login', { username: username });
-            renderMessages().catch(e => console.log('留言板首屏加载失败:', e));
+            renderMessages({ force: true }).catch(e => console.log('留言板首屏加载失败:', e));
             startAutoSync();
             startHeartbeat();
             setTimeout(updateOnlineStatus, 1000);
@@ -2712,19 +2882,16 @@
         async function openBubbleSettings(){ 
             if (!(await requirePermission('full'))) return;
             document.getElementById('bubbleSettingsModal').style.display='flex'; 
+            await loadBubbleConfig({ loadPhotos: true });
             renderBubblePreview(); 
         }
         // ========== DOM加载完成后初始化 ==========
         window.onload = function(){
-            // 优化：先同步检查是否有登录状态，有就立即隐藏气泡层，避免闪烁
-            let savedUser = localStorage.getItem('couple_logged_user');
-            if (savedUser) {
-                document.getElementById('bubbleLayer').style.display = 'none';
-            }
-            autoLogin();
+            document.getElementById('bubbleLayer').style.display = 'flex';
+            document.getElementById('loginPage').style.display = 'none';
+            document.getElementById('mainPage').style.display = 'none';
             
             if(!localStorage.getItem('couple_users')) cacheUsersLocally({"boy":{"pwd":"love1314","avatar":""},"girl":{"pwd":"love1314","avatar":""},"admin":{"pwd":"admin123","avatar":""}});
-            forceRefreshUserData();
             loadStorageModeSetting(); 
             let texts=['宝宝我爱你','我超喜欢你','我们要一直在一起','最爱宝宝啦'];
             for(let i=0;i<25;i++){ 
@@ -2747,8 +2914,7 @@
                     bubbleClicked++; 
                     document.getElementById('bubbleCount').innerText=bubbleClicked; 
                     if(bubbleClicked>=10){ 
-                        document.getElementById('bubbleLayer').style.display='none'; 
-                        document.getElementById('loginPage').style.display='flex'; 
+                        unlockEntryGate(); 
                     } 
                 }; 
                 document.getElementById('bubbleLayer').appendChild(b); 
@@ -2765,8 +2931,7 @@
                         bubbleClicked++; 
                         document.getElementById('bubbleCount').innerText=bubbleClicked; 
                         if(bubbleClicked>=10){ 
-                            document.getElementById('bubbleLayer').style.display='none'; 
-                            document.getElementById('loginPage').style.display='flex'; 
+                            unlockEntryGate(); 
                         } 
                     }; 
                     document.getElementById('bubbleLayer').appendChild(b); 
@@ -2802,6 +2967,9 @@
     </script>
 </body>
 </html>
+
+
+
 
 
 
