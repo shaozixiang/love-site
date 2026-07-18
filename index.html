@@ -1688,10 +1688,6 @@
             closeBubbleSettings(); 
             alert('背景气泡已保存，双方共享~'); 
         }
-        function openBubbleSettings(){ 
-            document.getElementById('bubbleSettingsModal').style.display='flex'; 
-            renderBubblePreview(); 
-        }
         function closeBubbleSettings(){ document.getElementById('bubbleSettingsModal').style.display='none'; }
         
         function createDreamBubble(url){ 
@@ -2042,21 +2038,6 @@
             document.getElementById('adminContent').innerHTML = html; 
         }
         
-        async function deleteUserAccount(username) { 
-            if(username === 'admin') { alert('不能删除管理员账号'); return; } 
-            let users = await loadUserData(); 
-            delete users[username]; 
-            try { 
-                const { error } = await sb.from('users').delete().eq('username', username);
-                if (error) throw error;
-                localStorage.setItem('couple_users', JSON.stringify(normalizeUsers(users)));
-            } catch(e) { alert('删除账号失败：' + e.message); return; }
-            // 记录删除用户日志
-            logAction('admin_delete_user', { username: username });
-            renderAdminData(); 
-            alert(`账号 ${username} 已删除`); 
-        }
-        
         // ========== 管理后台通用删除函数 ==========
         async function adminDelete(type, id) {
             if (!confirm('确定要删除这条数据吗？')) return;
@@ -2083,122 +2064,8 @@
         }
         
         // ========== 切换用户角色（管理员/普通用户） ==========
-        async function toggleUserRole(username) {
-            if (username === 'admin') {
-                alert('不能修改超级管理员的角色');
-                return;
-            }
-            let users = await loadUserData();
-            if (!users[username]) {
-                alert('用户不存在');
-                return;
-            }
-            
-            // 切换角色
-            if (users[username].role === 'admin') {
-                users[username].role = 'user';
-                alert(`已将 ${username} 设为普通用户`);
-            } else {
-                users[username].role = 'admin';
-                alert(`已将 ${username} 设为管理员`);
-            }
-            
-            // 记录日志
-            logAction('admin_toggle_role', { username: username, new_role: users[username].role });
-            
-            try {
-                await saveUsers(users);
-                renderAdminData();
-            } catch(e) { alert('保存角色失败：' + e.message); }
-        }
-        
-        async function setUserPermission(username, permission) {
-            if (username === 'admin') {
-                alert('不能修改超级管理员的权限');
-                return;
-            }
-            let users = await loadUserData();
-            if (!users[username]) {
-                alert('用户不存在');
-                return;
-            }
-            
-            const permLabels = { 'full': '完全权限', 'comment': '仅评论', 'view': '仅浏览' };
-            users[username].permission = permission;
-            
-            // 记录日志
-            logAction('admin_set_permission', { username: username, permission: permission });
-            
-            try {
-                await saveUsers(users);
-                alert(`已将 ${username} 的权限设为：${permLabels[permission]}`);
-                renderAdminData();
-            } catch(e) { alert('保存权限失败：' + e.message); }
-        }
         
         // 权限检查函数
-        async function hasPermission(required) {
-            // 管理员不受限制
-            if (isAdmin) return true;
-            
-            // 加载用户数据
-            const users = await forceRefreshUserData();
-            const userInfo = users[currentUser];
-            if (!userInfo) return false;
-            
-            const userPerm = userInfo.permission || 'full';
-            
-            // 权限级别：view < comment < full
-            const levels = { 'view': 1, 'comment': 2, 'full': 3 };
-            return (levels[userPerm] || 3) >= (levels[required] || 0);
-        }
-        async function requirePermission(required) {
-            const ok = await hasPermission(required);
-            if (!ok) {
-                const labels = { view: '浏览', comment: '评论/点赞', full: '发布/修改' };
-                alert(`当前账号没有“${labels[required] || required}”权限，请联系管理员调整权限`);
-            }
-            return ok;
-        }
-        async function canDeleteRecord(table, id) {
-            if (isAdmin) return true;
-            try {
-                const { data, error } = await sb.from(table).select('author').eq('id', id).maybeSingle();
-                if (!error && data && data.author === currentUser) return true;
-            } catch(e) {}
-            alert('只能删除自己发布的内容，或让管理员删除');
-            return false;
-        }
-        function ensureCommentMutationAllowed(comment) {
-            if (isAdmin || (comment && comment.author === currentUser)) return true;
-            alert('只能删除自己的评论，或让管理员删除');
-            return false;
-        }
-        async function forceRefreshUserData() {
-            const defaultUsers = {"boy":{"pwd":"love1314","avatar":"","permission":"full","role":"user"},"girl":{"pwd":"love1314","avatar":"","permission":"full","role":"user"},"admin":{"pwd":"admin123","avatar":"","permission":"full","role":"admin"}};
-            let users = defaultUsers;
-            try {
-                const { data, error } = await sb.from('users').select('username,password,avatar,permission,role');
-                if (!error && data && data.length > 0) {
-                    let cloudUsers = {};
-                    data.forEach(u => {
-                        cloudUsers[u.username] = normalizeUserInfo(u.username, {
-                            pwd: u.password,
-                            avatar: u.avatar || '',
-                            permission: u.permission || 'full',
-                            role: u.role || (u.username === 'admin' ? 'admin' : 'user')
-                        });
-                    });
-                    users = { ...defaultUsers, ...cloudUsers };
-                    localStorage.setItem('couple_users', JSON.stringify(users));
-                }
-            } catch(e) {
-                users = JSON.parse(localStorage.getItem('couple_users') || 'null') || defaultUsers;
-            }
-            users = normalizeUsers(users);
-            localStorage.setItem('couple_users', JSON.stringify(users));
-            return users;
-        }
         function normalizeUsers(users) {
             const normalized = {};
             for (let [username, info] of Object.entries(users || {})) {
@@ -2223,6 +2090,42 @@
                 permission: normalized.permission,
                 role: normalized.role
             };
+        }
+        function getCacheSafeUsers(users) {
+            const normalized = normalizeUsers(users);
+            const cacheSafe = {};
+            for (let [username, info] of Object.entries(normalized)) {
+                cacheSafe[username] = {
+                    pwd: info.pwd,
+                    avatar: '',
+                    permission: info.permission,
+                    role: info.role
+                };
+            }
+            return cacheSafe;
+        }
+        function safeSetLocalStorage(key, value) {
+            try {
+                localStorage.setItem(key, value);
+                return true;
+            } catch(e) {
+                console.warn('本地缓存写入失败，已跳过，不影响云端数据:', e);
+                try { localStorage.removeItem(key); } catch(_) {}
+                return false;
+            }
+        }
+        function cacheUsersLocally(users) {
+            return safeSetLocalStorage('couple_users', JSON.stringify(getCacheSafeUsers(users)));
+        }
+        function loadCachedUsers(defaultUsers) {
+            try {
+                const cached = localStorage.getItem('couple_users');
+                return cached ? normalizeUsers(JSON.parse(cached)) : defaultUsers;
+            } catch(e) {
+                console.warn('本地用户缓存读取失败，已恢复默认账号缓存:', e);
+                try { localStorage.removeItem('couple_users'); } catch(_) {}
+                return defaultUsers;
+            }
         }
         
         // ========== 管理员操作日志功能 ==========
@@ -2297,40 +2200,48 @@
         }
 
         // 🌟 核心提速修改点：优先读取本地，异步在后台同步云端
-        async function loadUserData() { 
-            return await forceRefreshUserData();
-        }
-
-        async function saveUsers(users) { 
-            users = normalizeUsers(users);
-            let syncError = null;
-            for (let [username, info] of Object.entries(users)) {
-                const row = buildUserRow(username, info);
-                const { error } = await sb.from('users').upsert(row, { onConflict: 'username' });
-                if (error) {
-                    syncError = error;
-                    break;
+        function resizeAvatarImage(file, size = 160, quality = 0.82) {
+            return new Promise((resolve, reject) => {
+                if (!file || !file.type.startsWith('image/')) {
+                    reject(new Error('请选择图片文件'));
+                    return;
                 }
-            }
-            if (syncError) throw syncError;
-            localStorage.setItem('couple_users', JSON.stringify(users));
+                const reader = new FileReader();
+                reader.onload = e => {
+                    const img = new Image();
+                    img.onload = () => {
+                        const canvas = document.createElement('canvas');
+                        canvas.width = size;
+                        canvas.height = size;
+                        const ctx = canvas.getContext('2d');
+                        const side = Math.min(img.width, img.height);
+                        const sx = Math.max(0, (img.width - side) / 2);
+                        const sy = Math.max(0, (img.height - side) / 2);
+                        ctx.drawImage(img, sx, sy, side, side, 0, 0, size, size);
+                        resolve(canvas.toDataURL('image/jpeg', quality));
+                    };
+                    img.onerror = () => reject(new Error('头像图片读取失败'));
+                    img.src = e.target.result;
+                };
+                reader.onerror = () => reject(new Error('头像文件读取失败'));
+                reader.readAsDataURL(file);
+            });
         }
-
         async function updateAvatar() { 
             let file = document.getElementById('avatarInput').files[0]; 
             if(!file) return; 
-            let reader = new FileReader(); 
-            reader.onload = async e => { 
+            try {
+                const avatarData = await resizeAvatarImage(file);
                 let users = await loadUserData(); 
-                if(users[currentUser]) users[currentUser].avatar = e.target.result; 
-                try { await saveUsers(users); } catch(err) { alert('头像同步到云端失败：' + err.message); return; }
-                document.getElementById('userAvatarImg').src = e.target.result; 
+                if(users[currentUser]) users[currentUser].avatar = avatarData; 
+                await saveUsers(users);
+                document.getElementById('userAvatarImg').src = avatarData; 
                 closeModalById('avatarModal'); 
-                // 记录更新头像日志
                 logAction('update_avatar', { file_name: file.name, file_size: file.size });
                 alert('头像已更新！'); 
-            }; 
-            reader.readAsDataURL(file); 
+            } catch(err) {
+                alert('头像同步到云端失败：' + err.message);
+            }
         }
         async function changePassword() { 
             let old = document.getElementById('oldPwd').value, 
@@ -2352,10 +2263,6 @@
             alert('密码修改成功，请重新登录'); 
             logout(); 
         }
-        function showRegisterModal() { 
-            if(!isAdmin) { alert('无权限'); return; } 
-            document.getElementById('registerModal').style.display='flex'; 
-        }
         async function registerNewUser() { 
             let newName = document.getElementById('newUsername').value.trim(); 
             let newPwd = document.getElementById('newUserPwd').value.trim(); 
@@ -2375,22 +2282,8 @@
             closeModalById('registerModal'); 
             if(isAdmin) renderAdminData(); 
         }
-        function openAdminPanel() { 
-            if(!isAdmin) { alert('无权限'); return; } 
-            document.getElementById('adminPanel').style.display = 'block'; 
-            renderAdminData(); 
-        }
         function closeAdminPanel() { 
             document.getElementById('adminPanel').style.display = 'none'; 
-        }
-        async function resetUserPwd(username) { 
-            let users = await loadUserData(); 
-            if(users[username]) users[username].pwd='love1314'; 
-            await saveUsers(users); 
-            // 记录重置密码日志
-            logAction('admin_reset_pwd', { username: username });
-            renderAdminData(); 
-            alert(`${username} 密码已重置为 love1314`); 
         }
         function adminSetStorageMode() { 
             let select = document.getElementById('adminStorageModeSelect'); 
@@ -2433,95 +2326,7 @@
         
         // ========== 自动登录与秒级登录核心逻辑 ==========
         // 永久记住登录状态，取消会话超时
-        async function autoLogin() {
-            let savedUser = localStorage.getItem('couple_logged_user');
-            if (!savedUser) return false;
-            // 取消会话超时检查，永久保持登录状态
-            // if (checkSessionTimeout()) return false;
-            
-            let users = await loadUserData();
-            if (savedUser === 'admin') {
-                currentUser = 'admin'; isAdmin = true;
-                document.getElementById('bubbleLayer').style.display = 'none';
-                loadStorageModeSetting();
-                // 管理员也进入主页面，同时拥有管理权限
-                enterMainSystem('admin', users);
-                return true;
-            }
-            
-            if (users[savedUser]) {
-                enterMainSystem(savedUser, users);
-                return true;
-            }
-            return false;
-        }
-
-        async function login(){ 
-            const u = document.getElementById('username').value.trim(); 
-            const p = document.getElementById('password').value.trim(); 
-            const btn = document.getElementById('loginBtn');
-            
-            if(!u || !p) { alert('请输入账号和密码'); return; }
-            if(btn) { btn.disabled = true; btn.innerText = '正在登录...'; }
-
-            let users = await loadUserData(); 
-            
-            if(users[u] && users[u].pwd===p){ 
-                localStorage.setItem('couple_logged_user', u);
-                enterMainSystem(u, users);
-            } else { 
-                // 记录登录失败日志
-                logAction('login_failed', { username: u, reason: '账号或密码错误' });
-                alert('账号或密码错误'); 
-            }
-            if(btn) { btn.disabled = false; btn.innerText = '登录'; }
-        }
-
         // 进入主系统解耦，统一并发提速
-        function enterMainSystem(username, users) {
-            currentUser = username; 
-            // 根据用户名或角色判断管理员权限
-            isAdmin = (username === 'admin') || (users[username] && users[username].role === 'admin');
-            updateActivity();
-            
-            // 记录登录日志
-            logAction('login', { username: username });
-            
-            loadAngryData().then(() => {
-                if (document.getElementById('angryMask').style.display === 'flex') return;
-                
-                document.getElementById('bubbleLayer').style.display = 'none';
-                document.getElementById('loginPage').style.display = 'none'; 
-                document.getElementById('mainPage').style.display = 'block'; 
-                document.getElementById('displayUsername').innerHTML = username==='boy'?'👦 boy':(username==='girl'?'👧 girl':username); 
-                
-                let avatar = users[username].avatar; 
-                if(avatar) document.getElementById('userAvatarImg').src = avatar; 
-                
-                loadStorageModeSetting(); 
-                updateTogetherDays(); 
-                
-                // 管理员显示管理后台入口
-                if (isAdmin) {
-                    let adminBtn = document.getElementById('adminEntryBtn');
-                    if (adminBtn) adminBtn.style.display = 'block';
-                }
-                
-                // 首次进入：并发渲染全部组件，互不阻塞
-                Promise.all([
-                    renderMessages(), renderFeeds(), renderLoves(), 
-                    renderMemories(), renderMemos(), renderSchedules(), 
-                    renderCountdowns(), loadBubbleConfig()
-                ]);
-
-                startAutoSync();
-                startHeartbeat();
-                setTimeout(updateOnlineStatus, 1000);
-                if (onlineStatusTimer) clearInterval(onlineStatusTimer);
-                onlineStatusTimer = setInterval(updateOnlineStatus, ONLINE_STATUS_INTERVAL_MS);
-            });
-        }
-
         function backToLogin(){ 
             document.getElementById('angryMask').style.display='none'; 
             document.getElementById('loginPage').style.display='flex'; 
@@ -2605,14 +2410,14 @@
                 }
                 users = { ...defaultUsers, ...cloudUsers };
                 lastUserSyncError = null;
-                localStorage.setItem('couple_users', JSON.stringify(users));
+                cacheUsersLocally(users);
             } catch(e) {
                 lastUserSyncError = e;
                 if (!allowLocalFallback) throw e;
-                users = JSON.parse(localStorage.getItem('couple_users') || 'null') || defaultUsers;
+                users = loadCachedUsers(defaultUsers);
             }
             users = normalizeUsers(users);
-            localStorage.setItem('couple_users', JSON.stringify(users));
+            cacheUsersLocally(users);
             return users;
         }
         async function loadUserData(options = {}) {
@@ -2634,7 +2439,7 @@
                 throw syncError;
             }
             lastUserSyncError = null;
-            localStorage.setItem('couple_users', JSON.stringify(users));
+            cacheUsersLocally(users);
         }
         async function hasPermission(required) {
             try {
@@ -2716,7 +2521,7 @@
             try {
                 const { error } = await sb.from('users').delete().eq('username', username);
                 if (error) throw error;
-                localStorage.setItem('couple_users', JSON.stringify(normalizeUsers(users)));
+                cacheUsersLocally(users);
             } catch(e) { alert('删除账号失败：' + e.message); return; }
             logAction('admin_delete_user', { username: username });
             renderAdminData();
@@ -2856,7 +2661,7 @@
             }
             autoLogin();
             
-            if(!localStorage.getItem('couple_users')) localStorage.setItem('couple_users','{"boy":{"pwd":"love1314","avatar":""},"girl":{"pwd":"love1314","avatar":""},"admin":{"pwd":"admin123","avatar":""}}');
+            if(!localStorage.getItem('couple_users')) cacheUsersLocally({"boy":{"pwd":"love1314","avatar":""},"girl":{"pwd":"love1314","avatar":""},"admin":{"pwd":"admin123","avatar":""}});
             forceRefreshUserData();
             loadStorageModeSetting(); 
             let texts=['宝宝我爱你','我超喜欢你','我们要一直在一起','最爱宝宝啦'];
