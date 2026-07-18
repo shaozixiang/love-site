@@ -697,7 +697,8 @@
         const SECTION_CACHE_MS = 90 * 1000;
         const AUTO_SYNC_INTERVAL_MS = 5 * 60 * 1000;
         const ONLINE_STATUS_INTERVAL_MS = 5 * 60 * 1000;
-        const REMOTE_LOG_ACTIONS = new Set([
+        const LOG_LOCAL_LIMIT = 300;
+        const LOG_REMOTE_ACTIONS = new Set([
             'admin_delete', 'admin_reset_pwd', 'admin_delete_user', 'admin_create_user',
             'admin_toggle_role', 'admin_set_permission', 'admin_toggle_visibility',
             'publish_feed', 'publish_message', 'publish_love', 'publish_memory',
@@ -2331,15 +2332,15 @@
                 try {
                     let localLogs = JSON.parse(localStorage.getItem('admin_logs') || '[]');
                     localLogs.unshift(logData);
-                    // 最多保留500条
-                    if (localLogs.length > 500) localLogs = localLogs.slice(0, 500);
+                    // 本地保留最近日志，后台会和云端日志合并展示
+                    if (localLogs.length > LOG_LOCAL_LIMIT) localLogs = localLogs.slice(0, LOG_LOCAL_LIMIT);
                     localStorage.setItem('admin_logs', JSON.stringify(localLogs));
                 } catch(e) {
                     console.error('保存本地日志失败:', e);
                 }
                 
                 // 异步尝试存到 Supabase（不阻塞）
-                if (REMOTE_LOG_ACTIONS.has(action)) {
+                if (LOG_REMOTE_ACTIONS.has(action)) {
                     try { await sb.from('admin_logs').insert(logData); } catch(e) {}
                 }
             } catch(e) {
@@ -2348,6 +2349,31 @@
         }
         
         // 获取日志列表
+        function readLocalAdminLogs() {
+            try {
+                const logs = JSON.parse(localStorage.getItem('admin_logs') || '[]');
+                return Array.isArray(logs) ? logs : [];
+            } catch(e) {
+                return [];
+            }
+        }
+        function getLogKey(log) {
+            if (!log) return '';
+            return [log.created_at || '', log.action || '', log.user || '', log.details || ''].join('|');
+        }
+        function mergeAdminLogs(remoteLogs = [], localLogs = []) {
+            const seen = new Set();
+            const merged = [];
+            for (let log of [...localLogs, ...remoteLogs]) {
+                const key = getLogKey(log);
+                if (!key || seen.has(key)) continue;
+                seen.add(key);
+                merged.push(log);
+            }
+            return merged
+                .sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0))
+                .slice(0, ADMIN_LIMIT);
+        }
         async function getAdminLogs() {
             let logs = [];
             
@@ -2358,13 +2384,7 @@
                     logs = data;
                 }
             } catch(e) {}
-            
-            // 如果云端没有，从本地获取
-            if (logs.length === 0) {
-                try {
-                    logs = JSON.parse(localStorage.getItem('admin_logs') || '[]');
-                } catch(e) {}
-            }
+            logs = mergeAdminLogs(logs, readLocalAdminLogs());
             
             return logs;
         }
