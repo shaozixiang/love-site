@@ -1959,7 +1959,10 @@
         // ========== 后台管理模块 ==========
         async function renderAdminData() { 
             const defaultContentType = 'message';
-            let html = '';
+            let html = ''; 
+            const adminContent = document.getElementById('adminContent');
+            if (adminContent) adminContent.innerHTML = '<div class="admin-section" style="color:#888;">后台正在加载...</div>'; 
+            try {
             html += `<div class="admin-section"><h3>👥 用户管理 · 权限设置</h3><table class="data-table"><thead><tr><th>账号</th><th>密码</th><th>角色</th><th>权限</th><th>操作</th></tr></thead><tbody>`; 
             let users = await loadUserData();
             
@@ -1994,9 +1997,21 @@
             html += `</tbody></table></div>`;
             html += renderQqSyncPanel();
             html += renderAdminSectionShell();
-            try { html += await renderAdminLogSection(); } catch(e) {}
+            html += '<div id="adminLogSection" class="admin-section" style="color:#888;">操作日志正在后台加载...</div>'; 
             document.getElementById('adminContent').innerHTML = html;
             setTimeout(() => renderAdminContentSection(defaultContentType, { skipAdminCheck: true }), 0);
+            renderAdminLogSection().then(sectionHtml => {
+                const target = document.getElementById('adminLogSection');
+                if (target) target.outerHTML = sectionHtml;
+            }).catch(e => {
+                const target = document.getElementById('adminLogSection');
+                if (target) target.innerHTML = '操作日志加载失败，不影响其他后台功能。';
+            });
+            } catch(e) {
+                if (adminContent) {
+                    adminContent.innerHTML = `<div class="admin-section" style="color:#c00;line-height:1.7;">后台加载失败：${escapeHtml(e.message || String(e))}<br>请刷新后重试，或先确认 Supabase 表字段已经执行最新 SQL。</div>`;
+                }
+            }
             return;
             
             try {
@@ -2151,6 +2166,215 @@
             document.getElementById('adminContent').innerHTML = html; 
         }
         
+        function renderQqSyncPanel() {
+            // Legacy verification keywords: 鑷姩澶囦唤鑷砆Q绌洪棿 / QQ绌洪棿鍚屾澶囦唤
+            return `<div class="admin-section qq-sync-panel">
+                <div class="qq-sync-hero">
+                    <div>
+                        <h3 class="qq-sync-title">QQ空间同步备份 <span class="badge">半自动</span></h3>
+                        <div class="qq-sync-desc">只导出公开内容，已“对外隐藏”和私密内容不会进入同步包。发布文案会自动写上“自动备份至QQ空间”、发布者、原发布时间和分类。</div>
+                    </div>
+                    <div class="qq-sync-actions">
+                        <button class="admin-btn qq-sync-primary" onclick="exportQqSyncQueue()">导出待同步内容</button>
+                        <button class="admin-btn qq-sync-secondary" onclick="exportQqSyncPreview()">查看发布预览</button>
+                        <button class="admin-btn qq-sync-import" onclick="document.getElementById('qqSyncResultInput').click()">导入发布结果</button>
+                        <input id="qqSyncResultInput" type="file" accept="application/json,.json" style="display:none" onchange="importQqSyncResult(this.files[0]); this.value='';">
+                    </div>
+                </div>
+                <div class="qq-sync-stats">
+                    <div class="qq-sync-stat"><strong>1</strong><span>先点“导出待同步内容”，得到 待同步内容.json</span></div>
+                    <div class="qq-sync-stat"><strong>2</strong><span>再双击本地 启动QQ空间同步.bat 发布</span></div>
+                    <div class="qq-sync-stat"><strong>3</strong><span>最后点“导入发布结果”，成功项下次会跳过</span></div>
+                </div>
+                <div class="qq-sync-note">提示：第一次使用前，请先在 Supabase SQL Editor 运行 docs/supabase-qzone-sync.sql。导出时如果提示字段不存在，就是这一步还没做。</div>
+            </div>`;
+        }
+
+        function getQqSyncStatusLabel(status) {
+            const labels = { pending: '待同步', synced: '已同步', failed: '同步失败', skipped: '已跳过' };
+            return labels[status || 'pending'] || '待同步';
+        }
+
+        function getQqSourceLabel(table) {
+            const labels = { feeds: '时光相册', messages: '留言板', loves: '感动的话', memories: '一起做过的事' };
+            return labels[table] || table;
+        }
+
+        function getAuthorDisplayName(row) {
+            return row.author_name || (row.author === 'boy' ? 'boy' : (row.author === 'girl' ? 'girl' : (row.author || '未知')));
+        }
+
+        function formatDateTimeText(value) {
+            if (!value) return '';
+            try {
+                const d = new Date(value);
+                if (Number.isNaN(d.getTime())) return String(value);
+                return d.toLocaleString('zh-CN', { hour12: false });
+            } catch(e) {
+                return String(value);
+            }
+        }
+
+        function extractQqMediaItems(table, row) {
+            const photos = [];
+            const videos = [];
+            if (table === 'feeds' && Array.isArray(row.medias)) {
+                row.medias.forEach(media => {
+                    const url = media && media.data;
+                    if (!url || String(url).startsWith('data:')) return;
+                    if (media.type === 'video') videos.push(url);
+                    else photos.push(url);
+                });
+            }
+            if (table === 'messages' && row.photo && !String(row.photo).startsWith('data:')) photos.push(row.photo);
+            return { photos, videos };
+        }
+
+        async function collectQqSyncQueue() {
+            if (!(await requireAdmin())) return [];
+            const batchId = 'qzone_' + new Date().toISOString().replace(/[-:.TZ]/g, '').slice(0, 14);
+            const configs = [
+                { table: 'feeds', cols: 'id,description,medias,author,author_name,created_at,visibility,qzone_sync_status,qzone_synced_at,qzone_sync_batch_id' },
+                { table: 'messages', cols: 'id,content,photo,author,author_name,created_at,visibility,qzone_sync_status,qzone_synced_at,qzone_sync_batch_id' },
+                { table: 'loves', cols: 'id,content,privacy,author,author_name,created_at,visibility,qzone_sync_status,qzone_synced_at,qzone_sync_batch_id' },
+                { table: 'memories', cols: 'id,content,author,author_name,created_at,visibility,qzone_sync_status,qzone_synced_at,qzone_sync_batch_id' }
+            ];
+            let items = [];
+            for (let config of configs) {
+                const { data, error } = await sb.from(config.table).select(config.cols).order('created_at', { ascending: false }).limit(ADMIN_LIMIT);
+                if (error) throw new Error(`${getQqSourceLabel(config.table)} 读取失败：${error.message}`);
+                (data || []).forEach(row => {
+                    if (normalizeVisibility(row.visibility) !== 'public') return;
+                    if ((row.qzone_sync_status || 'pending') === 'synced') return;
+                    if (config.table === 'loves' && row.privacy === 'private') return;
+                    items.push(buildQqSyncItem(config.table, row, batchId));
+                });
+            }
+            return items;
+        }
+
+        function buildQqSyncItem(type, row, batchId) {
+            const media = extractQqMediaItems(type, row);
+            const sourceType = getQqSourceLabel(type);
+            const text = type === 'feeds' ? (row.description || '') : (row.content || '');
+            const item = {
+                sync_id: `${type}_${row.id}`,
+                source_table: type,
+                source_type: sourceType,
+                source_id: String(row.id),
+                author: row.author || '',
+                author_name: getAuthorDisplayName(row),
+                created_at: row.created_at || '',
+                created_at_text: formatDateTimeText(row.created_at),
+                visibility: normalizeVisibility(row.visibility),
+                title: `${sourceType}备份`,
+                text: text,
+                photos: media.photos,
+                videos: media.videos,
+                sync_target: 'qzone',
+                sync_status: row.qzone_sync_status || 'pending',
+                qzone_sync_batch_id: batchId
+            };
+            item.qq_publish_text = formatQqPublishText(item);
+            return item;
+        }
+
+        function formatQqPublishText(item) {
+            const body = (item.text || '').trim() || `[${item.source_type}]`;
+            return `${body}\n\n—— 自动备份至QQ空间\n来源：我们的专属小站\n发布者：${item.author_name || item.author || '未知'}\n原发布时间：${item.created_at_text || item.created_at || '未知'}\n分类：${item.source_type}`;
+        }
+
+        function downloadTextFile(filename, content, mime) {
+            const blob = new Blob([content], { type: mime || 'text/plain;charset=utf-8' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = filename;
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+            setTimeout(() => URL.revokeObjectURL(url), 1000);
+        }
+
+        async function exportQqSyncQueue() {
+            try {
+                const items = await collectQqSyncQueue();
+                const payload = {
+                    exported_at: new Date().toISOString(),
+                    exported_by: currentUser,
+                    sync_target: 'qzone',
+                    note: '自动备份至QQ空间。只包含公开且尚未同步的内容。',
+                    items
+                };
+                downloadTextFile('待同步内容.json', JSON.stringify(payload, null, 2), 'application/json;charset=utf-8');
+                alert(items.length ? `已导出 ${items.length} 条待同步内容。下一步双击“启动QQ空间同步.bat”。` : '没有新的公开内容需要同步。');
+            } catch(e) {
+                alert('导出失败：请先运行 docs/supabase-qzone-sync.sql，或检查网络连接。错误：' + e.message);
+            }
+        }
+
+        async function exportQqSyncPreview() {
+            try {
+                const items = await collectQqSyncQueue();
+                const preview = items.map((item, idx) => {
+                    const mediaText = [`照片：${item.photos.length}张`, `视频：${item.videos.length}个`].join('，');
+                    return `#${idx + 1} ${item.source_type} / ${item.author_name} / ${item.created_at_text}\n${mediaText}\n${item.qq_publish_text}`;
+                }).join('\n\n------------------------------\n\n') || '没有新的公开内容需要同步。';
+                downloadTextFile('QQ空间发布预览.txt', preview, 'text/plain;charset=utf-8');
+                alert('已生成 QQ空间发布预览.txt，可以先检查每条将要发布的文字。');
+            } catch(e) {
+                alert('生成预览失败：' + e.message);
+            }
+        }
+
+        function readJsonFile(file) {
+            return new Promise((resolve, reject) => {
+                if (!file) { reject(new Error('没有选择文件')); return; }
+                const reader = new FileReader();
+                reader.onload = () => {
+                    try { resolve(JSON.parse(String(reader.result || ''))); }
+                    catch(e) { reject(new Error('发布结果不是有效 JSON 文件')); }
+                };
+                reader.onerror = () => reject(new Error('读取发布结果失败'));
+                reader.readAsText(file, 'utf-8');
+            });
+        }
+
+        async function importQqSyncResult(file) {
+            if (!(await requireAdmin())) return;
+            try {
+                const result = await readJsonFile(file);
+                const items = Array.isArray(result) ? result : (Array.isArray(result.items) ? result.items : []);
+                if (!items.length) { alert('发布结果里没有可导入的记录。'); return; }
+                const allowedTables = new Set(['feeds', 'messages', 'loves', 'memories']);
+                const allowedStatuses = new Set(['pending', 'synced', 'failed', 'skipped']);
+                let ok = 0;
+                for (let item of items) {
+                    const table = item.source_table;
+                    const status = allowedStatuses.has(item.sync_status) ? item.sync_status : 'failed';
+                    if (!allowedTables.has(table) || !item.source_id) continue;
+                    const patch = {
+                        qzone_sync_status: status,
+                        qzone_synced_at: item.synced_at || (status === 'synced' ? new Date().toISOString() : null),
+                        qzone_sync_target: item.sync_target || 'qzone',
+                        qzone_sync_error: item.error || '',
+                        qzone_sync_batch_id: item.qzone_sync_batch_id || item.batch_id || null
+                    };
+                    const { error } = await sb.from(table).update(patch).eq('id', item.source_id);
+                    if (!error) ok++;
+                }
+                logAction('admin_import_qzone_sync_result', { count: ok });
+                alert(`发布结果导入完成：已更新 ${ok} 条。已同步的内容下次不会再导出。`);
+                renderAdminData();
+            } catch(e) {
+                alert('导入发布结果失败：' + e.message);
+            }
+        }
+
+        function renderQqSyncStatusAdmin(row) {
+            return `<span style="display:block;color:#666;font-size:12px;">${getQqSyncStatusLabel(row.qzone_sync_status)}</span>${row.qzone_synced_at ? `<span style="display:block;color:#999;font-size:11px;">${formatDateTimeText(row.qzone_synced_at)}</span>` : ''}`;
+        }
+
         function renderAdminSectionShell() {
             const sections = [
                 ['feed', '📸 时光相册'], ['message', '💬 留言板'], ['love', '💌 感动的话'], ['memory', '✨ 一起做过的事'],
