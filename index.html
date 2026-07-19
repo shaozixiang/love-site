@@ -713,11 +713,15 @@
         const ONLINE_STATUS_INTERVAL_MS = 5 * 60 * 1000;
         const LOG_LOCAL_LIMIT = 300;
         const LOG_REMOTE_ACTIONS = new Set([
+            'login', 'login_new_device', 'login_known_device', 'logout', 'login_failed',
             'admin_delete', 'admin_reset_pwd', 'admin_delete_user', 'admin_create_user',
             'admin_toggle_role', 'admin_set_permission', 'admin_toggle_visibility',
+            'update_avatar', 'change_password',
             'publish_feed', 'publish_message', 'publish_love', 'publish_memory',
             'publish_memo', 'publish_schedule', 'publish_countdown', 'publish_marker'
         ]);
+        const DEVICE_ID_KEY = 'couple_client_device_id';
+        const DEVICE_LOGIN_PREFIX = 'couple_login_device_';
         const sectionLoadedAt = {};
         function selectUserAuthRows() { return 'username,password,permission,role'; }
         function selectContentRows(table, columns, options = {}) {
@@ -1006,7 +1010,7 @@
             try { await sb.from('feeds').delete().eq('id', id); } catch(e) { console.error(e); }
             // 记录删除日志
             logAction('delete_feed', { feed_id: id });
-            renderFeeds(); 
+            await renderFeeds({ force: true }); 
         }
         
         // ========== 动态点赞功能 ==========
@@ -2013,157 +2017,6 @@
                 }
             }
             return;
-            
-            try {
-                const { data: feeds } = await sb.from('feeds').select('id,description,author_name,created_at,visibility').order('created_at', { ascending: false }).limit(ADMIN_LIMIT);
-                html += `<div class="admin-section"><h3>📸 时光相册动态 (${feeds ? feeds.length : 0}条)</h3><table class="data-table"><thead><tr><th>描述</th><th>作者</th><th>时间</th><th>可见性</th><th>操作</th></tr></thead><tbody>`; 
-                if (feeds) for(let f of feeds) { 
-                    html += `<tr><td>${escapeHtml(f.description || '').substring(0,30)}</td><td>${f.author_name}</td><td>${new Date(f.created_at).toLocaleString()}</td><td>${renderVisibilityAdminControls('feed', f.id, f.visibility)}</td><td><button class="admin-btn danger" onclick="deleteFeed('${f.id}')">删除</button></td></tr>`; 
-                }
-                html += `</tbody></table></div>`;
-            } catch(e) {}
-            
-            // 💬 留言板管理
-            try {
-                const { data: messages } = await sb.from('messages').select('id,content,author_name,created_at,visibility').order('created_at', { ascending: false }).limit(ADMIN_LIMIT);
-                html += `<div class="admin-section"><h3>💬 留言板 (${messages ? messages.length : 0}条)</h3><table class="data-table"><thead><tr><th>内容</th><th>作者</th><th>时间</th><th>可见性</th><th>操作</th></tr></thead><tbody>`;
-                if (messages) for(let m of messages) {
-                    html += `<tr><td>${escapeHtml(m.content || '').substring(0,30)}</td><td>${m.author_name}</td><td>${new Date(m.created_at).toLocaleString()}</td><td>${renderVisibilityAdminControls('message', m.id, m.visibility)}</td><td><button class="admin-btn danger" onclick="adminDelete('message', '${m.id}')">删除</button></td></tr>`;
-                }
-                html += `</tbody></table></div>`;
-            } catch(e) {}
-            
-            // 💌 感动的话管理
-            try {
-                const { data: loves } = await sb.from('loves').select('id,content,author_name,privacy,created_at,visibility').order('created_at', { ascending: false }).limit(ADMIN_LIMIT);
-                html += `<div class="admin-section"><h3>💌 感动的话 (${loves ? loves.length : 0}条)</h3><table class="data-table"><thead><tr><th>内容</th><th>作者</th><th>隐私</th><th>时间</th><th>可见性</th><th>操作</th></tr></thead><tbody>`;
-                if (loves) for(let l of loves) {
-                    html += `<tr><td>${escapeHtml(l.content || '').substring(0,30)}</td><td>${l.author_name}</td><td>${l.privacy === 'private' ? '🔒 私密' : '公开'}</td><td>${new Date(l.created_at).toLocaleString()}</td><td>${renderVisibilityAdminControls('love', l.id, l.visibility)}</td><td><button class="admin-btn danger" onclick="adminDelete('love', '${l.id}')">删除</button></td></tr>`;
-                }
-                html += `</tbody></table></div>`;
-            } catch(e) {}
-            
-            // ✨ 一起做过的事管理
-            try {
-                const { data: memories } = await sb.from('memories').select('id,content,author_name,created_at,visibility').order('created_at', { ascending: false }).limit(ADMIN_LIMIT);
-                html += `<div class="admin-section"><h3>✨ 一起做过的事 (${memories ? memories.length : 0}条)</h3><table class="data-table"><thead><tr><th>内容</th><th>作者</th><th>时间</th><th>可见性</th><th>操作</th></tr></thead><tbody>`;
-                if (memories) for(let mem of memories) {
-                    html += `<tr><td>${escapeHtml(mem.content || '').substring(0,30)}</td><td>${mem.author_name}</td><td>${new Date(mem.created_at).toLocaleString()}</td><td>${renderVisibilityAdminControls('memory', mem.id, mem.visibility)}</td><td><button class="admin-btn danger" onclick="adminDelete('memory', '${mem.id}')">删除</button></td></tr>`;
-                }
-                html += `</tbody></table></div>`;
-            } catch(e) {}
-            
-            // 📋 待办备忘录管理
-            try {
-                const { data: memos } = await sb.from('memos').select('id,content,author_name,priority,done,created_at,visibility').order('created_at', { ascending: false }).limit(ADMIN_LIMIT);
-                html += `<div class="admin-section"><h3>📋 待办备忘录 (${memos ? memos.length : 0}条)</h3><table class="data-table"><thead><tr><th>内容</th><th>作者</th><th>优先级</th><th>状态</th><th>可见性</th><th>操作</th></tr></thead><tbody>`;
-                if (memos) for(let memo of memos) {
-                    const priorityLabels = { high: '🔴 高', medium: '🟡 中', low: '🟢 低' };
-                    html += `<tr><td>${escapeHtml(memo.content || '').substring(0,30)}</td><td>${memo.author_name}</td><td>${priorityLabels[memo.priority] || memo.priority}</td><td>${memo.done ? '✅ 已完成' : '⏳ 进行中'}</td><td>${renderVisibilityAdminControls('memo', memo.id, memo.visibility)}</td><td><button class="admin-btn danger" onclick="adminDelete('memo', '${memo.id}')">删除</button></td></tr>`;
-                }
-                html += `</tbody></table></div>`;
-            } catch(e) {}
-            
-            // 📝 行程管理
-            try {
-                const { data: schedules } = await sb.from('schedules').select('id,title,start_date,end_date,author_name,created_at,visibility').order('created_at', { ascending: false }).limit(ADMIN_LIMIT);
-                html += `<div class="admin-section"><h3>📝 行程安排 (${schedules ? schedules.length : 0}条)</h3><table class="data-table"><thead><tr><th>标题</th><th>日期</th><th>作者</th><th>可见性</th><th>操作</th></tr></thead><tbody>`;
-                if (schedules) for(let s of schedules) {
-                    let dateRange = s.start_date ? (s.end_date ? `${s.start_date} ~ ${s.end_date}` : s.start_date) : '';
-                    html += `<tr><td>${escapeHtml(s.title || '').substring(0,20)}</td><td>${dateRange}</td><td>${s.author_name}</td><td>${renderVisibilityAdminControls('schedule', s.id, s.visibility)}</td><td><button class="admin-btn danger" onclick="adminDelete('schedule', '${s.id}')">删除</button></td></tr>`;
-                }
-                html += `</tbody></table></div>`;
-            } catch(e) {}
-            
-            // ⏰ 纪念日倒计时管理
-            try {
-                const { data: countdowns } = await sb.from('countdowns').select('id,name,target_date,author_name,created_at,visibility').order('created_at', { ascending: false }).limit(ADMIN_LIMIT);
-                html += `<div class="admin-section"><h3>⏰ 纪念日倒计时 (${countdowns ? countdowns.length : 0}条)</h3><table class="data-table"><thead><tr><th>标题</th><th>目标日期</th><th>作者</th><th>可见性</th><th>操作</th></tr></thead><tbody>`;
-                if (countdowns) for(let c of countdowns) {
-                    html += `<tr><td>${escapeHtml(c.name || '').substring(0,20)}</td><td>${c.target_date || ''}</td><td>${c.author_name}</td><td>${renderVisibilityAdminControls('countdown', c.id, c.visibility)}</td><td><button class="admin-btn danger" onclick="adminDelete('countdown', '${c.id}')">删除</button></td></tr>`;
-                }
-                html += `</tbody></table></div>`;
-            } catch(e) {}
-            
-            // 🗺️ 旅行地图标记管理
-            try {
-                const { data: markers } = await sb.from('travel_markers').select('id,name,description,author_name,created_at,visibility').order('created_at', { ascending: false }).limit(ADMIN_LIMIT);
-                html += `<div class="admin-section"><h3>🗺️ 旅行地图标记 (${markers ? markers.length : 0}个)</h3><table class="data-table"><thead><tr><th>名称</th><th>描述</th><th>作者</th><th>可见性</th><th>操作</th></tr></thead><tbody>`;
-                if (markers) for(let mk of markers) {
-                    html += `<tr><td>${escapeHtml(mk.name || '').substring(0,15)}</td><td>${escapeHtml(mk.description || '').substring(0,20)}</td><td>${mk.author_name}</td><td>${renderVisibilityAdminControls('marker', mk.id, mk.visibility)}</td><td><button class="admin-btn danger" onclick="adminDelete('marker', '${mk.id}')">删除</button></td></tr>`;
-                }
-                html += `</tbody></table></div>`;
-            } catch(e) {}
-            
-            // 📋 操作日志管理
-            try {
-                const logs = await getAdminLogs();
-                const actionLabels = {
-                    'login': '🔐 用户登录',
-                    'logout': '🚪 用户登出',
-                    'login_failed': '❌ 登录失败',
-                    'publish_feed': '📸 发布相册',
-                    'publish_message': '💬 发布留言',
-                    'publish_love': '💌 发布感动',
-                    'publish_memory': '✨ 添加回忆',
-                    'publish_memo': '📋 添加待办',
-                    'publish_schedule': '📝 添加行程',
-                    'publish_countdown': '⏰ 添加纪念日',
-                    'publish_marker': '🗺️ 添加地图标记',
-                    'delete_feed': '🗑️ 删除相册',
-                    'delete_message': '🗑️ 删除留言',
-                    'delete_love': '🗑️ 删除感动',
-                    'delete_memory': '🗑️ 删除回忆',
-                    'delete_memo': '🗑️ 删除待办',
-                    'delete_schedule': '🗑️ 删除行程',
-                    'delete_countdown': '🗑️ 删除纪念日',
-                    'delete_marker': '🗑️ 删除地图标记',
-                    'like_feed': '❤️ 点赞动态',
-                    'unlike_feed': '💔 取消点赞动态',
-                    'like_message': '❤️ 点赞留言',
-                    'unlike_message': '💔 取消点赞留言',
-                    'comment_feed': '💬 评论动态',
-                    'comment_message': '💬 评论留言',
-                    'delete_comment_feed': '🗑️ 删除动态评论',
-                    'delete_comment_message': '🗑️ 删除留言评论',
-                    'update_avatar': '🖼️ 更新头像',
-                    'change_password': '🔑 修改密码',
-                    'angry_on': '😠 开启生气模式',
-                    'angry_off': '😊 关闭生气模式',
-                    'apology_submit': '💌 提交道歉信',
-                    'apology_pass': '✅ 道歉信通过',
-                    'apology_reject': '❌ 道歉信驳回',
-                    'admin_delete': '🔧 管理员删除',
-                    'admin_reset_pwd': '🔧 管理员重置密码',
-                    'admin_delete_user': '🔧 管理员删除账号',
-                    'admin_create_user': '🔧 管理员创建账号',
-                    'admin_toggle_role': '🔧 切换用户角色',
-                    'admin_set_permission': '🔧 设置用户权限',
-                    'admin_toggle_visibility': '🔒 切换对外可见性',
-                    'view_page': '👁️ 浏览页面',
-                    'switch_tab': '🔄 切换标签页'
-                };
-                
-                html += `<div class="admin-section"><h3>📋 操作日志 (${logs ? logs.length : 0}条)</h3><div style="max-height:400px;overflow-y:auto;"><table class="data-table"><thead><tr><th>时间</th><th>用户</th><th>操作</th><th>详情</th></tr></thead><tbody>`;
-                if (logs && logs.length > 0) {
-                    for(let log of logs.slice(0, 50)) {
-                        let details = '';
-                        try {
-                            const parsed = JSON.parse(log.details);
-                            details = Object.entries(parsed).map(([k, v]) => `${k}: ${String(v).substring(0, 20)}`).join(', ');
-                        } catch(e) {
-                            details = log.details ? String(log.details).substring(0, 30) : '';
-                        }
-                        const actionLabel = actionLabels[log.action] || log.action;
-                        html += `<tr><td style="font-size:11px;white-space:nowrap;">${new Date(log.created_at).toLocaleString()}</td><td>${log.user}</td><td>${actionLabel}</td><td style="font-size:11px;color:#666;">${escapeHtml(details)}</td></tr>`;
-                    }
-                } else {
-                    html += `<tr><td colspan="4" style="text-align:center;color:#999;padding:20px;">暂无日志记录</td></tr>`;
-                }
-                html += `</tbody></table></div></div>`;
-            } catch(e) {}
-            
-            document.getElementById('adminContent').innerHTML = html; 
         }
         
         function renderQqSyncPanel() {
@@ -2429,6 +2282,8 @@
         async function renderAdminLogSection() {
             const logs = await getAdminLogs();
             const actionLabels = {
+                'login_new_device': '🆕 新设备登录',
+                'login_known_device': '🔁 常用设备登录',
                 login: '🔐 用户登录', logout: '🚪 用户登出', login_failed: '❌ 登录失败', publish_feed: '📸 发布相册', publish_message: '💬 发布留言',
                 publish_love: '💌 发布感动', publish_memory: '✨ 添加回忆', publish_memo: '📋 添加待办', publish_schedule: '📝 添加行程',
                 publish_countdown: '⏰ 添加纪念日', publish_marker: '🗺️ 添加地图标记', admin_delete: '🔧 管理员删除',
@@ -2469,6 +2324,7 @@
                 // 记录管理员删除日志
                 logAction('admin_delete', { type: type, id: id });
                 renderAdminData();
+                if (type === 'feed') await renderFeeds({ force: true });
             } catch(e) {
                 alert('删除失败: ' + e.message);
             }
@@ -2542,24 +2398,76 @@
         
         // ========== 管理员操作日志功能 ==========
         // 记录操作日志（优先存云端，失败则存本地）
+        function getClientDeviceId() {
+            try {
+                let deviceId = localStorage.getItem(DEVICE_ID_KEY);
+                if (!deviceId) {
+                    let randomPart = Math.random().toString(36).slice(2, 10);
+                    if (window.crypto && crypto.getRandomValues) {
+                        const randomValues = new Uint32Array(2);
+                        crypto.getRandomValues(randomValues);
+                        randomPart = Array.from(randomValues).map(n => n.toString(36)).join('').slice(0, 12);
+                    }
+                    deviceId = `device_${Date.now().toString(36)}_${randomPart}`;
+                    safeSetLocalStorage(DEVICE_ID_KEY, deviceId);
+                }
+                return deviceId;
+            } catch(e) {
+                return `session_${Date.now().toString(36)}`;
+            }
+        }
+        function getDeviceLoginKey(username) {
+            return DEVICE_LOGIN_PREFIX + String(username || 'guest').replace(/[^a-z0-9_-]/gi, '_');
+        }
+        function readLoginDeviceIds(username) {
+            try {
+                const parsed = JSON.parse(localStorage.getItem(getDeviceLoginKey(username)) || '[]');
+                return Array.isArray(parsed) ? parsed.filter(Boolean) : [];
+            } catch(e) {
+                return [];
+            }
+        }
+        function getLoginDeviceState(username) {
+            const deviceId = getClientDeviceId();
+            const knownDevices = readLoginDeviceIds(username);
+            const isKnown = knownDevices.includes(deviceId);
+            return {
+                deviceId,
+                isNewDevice: !isKnown,
+                scope: isKnown ? 'known_device' : (knownDevices.length ? 'new_device' : 'first_device'),
+                knownDeviceCount: knownDevices.length
+            };
+        }
+        function rememberLoginDevice(username, deviceId) {
+            if (!username || !deviceId) return;
+            const knownDevices = readLoginDeviceIds(username).filter(id => id !== deviceId);
+            knownDevices.unshift(deviceId);
+            safeSetLocalStorage(getDeviceLoginKey(username), JSON.stringify(knownDevices.slice(0, 20)));
+        }
+        function getDeviceLabel() {
+            const screenSize = window.screen ? `${window.screen.width}x${window.screen.height}` : 'unknown';
+            return `${navigator.platform || 'unknown'} | ${screenSize}`;
+        }
+        function buildLogDetails(details = {}) {
+            const screenSize = window.screen ? `${window.screen.width}x${window.screen.height}` : 'unknown';
+            const envInfo = {
+                device_id: getClientDeviceId(),
+                device_label: getDeviceLabel(),
+                user_agent: navigator.userAgent.substring(0, 100),
+                platform: navigator.platform,
+                language: navigator.language,
+                screen_size: screenSize,
+                page_url: window.location.href.substring(0, 100),
+                current_tab: currentTab || 'unknown'
+            };
+            return {
+                ...envInfo,
+                ...(typeof details === 'string' ? { message: details } : details)
+            };
+        }
         async function logAction(action, details = {}) {
             try {
-                // 收集设备和环境信息
-                const envInfo = {
-                    user_agent: navigator.userAgent.substring(0, 100),
-                    platform: navigator.platform,
-                    language: navigator.language,
-                    screen_size: `${screen.width}x${screen.height}`,
-                    page_url: window.location.href.substring(0, 100),
-                    current_tab: currentTab || 'unknown'
-                };
-                
-                // 合并详情信息
-                const fullDetails = {
-                    ...envInfo,
-                    ...(typeof details === 'string' ? { message: details } : details)
-                };
-                
+                const fullDetails = buildLogDetails(details);
                 const logData = {
                     action: action,
                     user: currentUser || 'guest',
@@ -2567,28 +2475,22 @@
                     created_at: new Date().toISOString()
                 };
                 
-                // 先立即存到本地，确保日志不丢失
                 try {
                     let localLogs = JSON.parse(localStorage.getItem('admin_logs') || '[]');
                     localLogs.unshift(logData);
-                    // 本地保留最近日志，后台会和云端日志合并展示
                     if (localLogs.length > LOG_LOCAL_LIMIT) localLogs = localLogs.slice(0, LOG_LOCAL_LIMIT);
                     localStorage.setItem('admin_logs', JSON.stringify(localLogs));
                 } catch(e) {
-                    console.error('保存本地日志失败:', e);
+                    console.error('淇濆瓨鏈湴鏃ュ織澶辫触:', e);
                 }
                 
-                // 异步尝试存到 Supabase（不阻塞）
                 if (LOG_REMOTE_ACTIONS.has(action)) {
                     try { await sb.from('admin_logs').insert(logData); } catch(e) {}
                 }
             } catch(e) {
-                console.error('记录日志失败:', e);
+                console.error('璁板綍鏃ュ織澶辫触:', e);
             }
-        }
-        
-        // 获取日志列表
-        function readLocalAdminLogs() {
+        }        function readLocalAdminLogs() {
             try {
                 const logs = JSON.parse(localStorage.getItem('admin_logs') || '[]');
                 return Array.isArray(logs) ? logs : [];
@@ -2705,7 +2607,8 @@
                 alert('注册失败：账号没有同步到云端。请先检查 Supabase users 表是否已运行 docs/supabase-permissions.sql。\n\n错误：' + e.message);
                 return;
             }
-            alert(`账号 ${newName} 注册成功！`); 
+                        logAction('admin_create_user', { username: newName, permission: 'full', role: 'user' });
+alert(`账号 ${newName} 注册成功！`); 
             document.getElementById('newUsername').value = ''; 
             document.getElementById('newUserPwd').value = ''; 
             closeModalById('registerModal'); 
@@ -3118,6 +3021,8 @@
         function enterMainSystem(username, users) {
             currentUser = username;
             currentTab = 'message';
+            const deviceState = getLoginDeviceState(username);
+            const deviceId = deviceState.deviceId;
             const userInfo = users[username] || {};
             isAdmin = (username === 'admin') || userInfo.role === 'admin';
             document.getElementById('bubbleLayer').style.display = 'none';
@@ -3129,7 +3034,9 @@
             updateTogetherDays();
             updateAdminVisibility();
             updateActivity();
-            logAction('login', { username: username });
+            const loginAction = deviceState.isNewDevice ? 'login_new_device' : 'login_known_device';
+            logAction(loginAction, { username: username, device_id: deviceId, device_scope: deviceState.scope, known_device_count: deviceState.knownDeviceCount });
+            rememberLoginDevice(username, deviceId);
             renderMessages({ force: true }).catch(e => console.log('留言板首屏加载失败:', e));
             startAutoSync();
             startHeartbeat();
