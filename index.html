@@ -732,8 +732,13 @@
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ action, sessionToken: getSessionToken(), ...payload })
             });
-            const result = await response.json().catch(() => ({}));
-            if (!response.ok) throw new Error(result.error || '账号接口请求失败');
+            const responseText = await response.text();
+            let result = {};
+            try { result = responseText ? JSON.parse(responseText) : {}; } catch(e) {
+                const preview = responseText ? responseText.slice(0, 120).replace(/\s+/g, ' ') : '空响应';
+                throw new Error(`/api/account 返回的不是 JSON。HTTP ${response.status}，内容：${preview}`);
+            }
+            if (!response.ok) throw new Error(result.error || `/api/account 请求失败，HTTP ${response.status}`);
             return result;
         }
         function userArrayToMap(list = []) {
@@ -1968,13 +1973,12 @@
         
         // ========== 后台管理模块 ==========
         async function renderAdminData() { 
-            const defaultContentType = 'message';
             let html = ''; 
             const adminContent = document.getElementById('adminContent');
             if (adminContent) adminContent.innerHTML = '<div class="admin-section" style="color:#888;">后台正在加载...</div>'; 
             try {
             html += `<div class="admin-section"><h3>👥 用户管理 · 权限设置</h3><table class="data-table"><thead><tr><th>账号</th><th>角色</th><th>权限</th><th>操作</th></tr></thead><tbody>`; 
-            let users = await loadUserData();
+            let users = await loadUserData({ includeAll: true, allowLocalFallback: false });
             
             for(let [uname, info] of Object.entries(users)) { 
                 let isAdminUser = uname === 'admin' || info.role === 'admin';
@@ -2008,14 +2012,15 @@
             html += renderAdminSectionShell();
             html += '<div id="adminLogSection" class="admin-section" style="color:#888;">操作日志正在后台加载...</div>'; 
             document.getElementById('adminContent').innerHTML = html;
-            setTimeout(() => renderAdminContentSection(defaultContentType, { skipAdminCheck: true }), 0);
-            renderAdminLogSection().then(sectionHtml => {
-                const target = document.getElementById('adminLogSection');
-                if (target) target.outerHTML = sectionHtml;
-            }).catch(e => {
-                const target = document.getElementById('adminLogSection');
-                if (target) target.innerHTML = '操作日志加载失败，不影响其他后台功能。';
-            });
+            setTimeout(() => {
+                renderAdminLogSection().then(sectionHtml => {
+                    const target = document.getElementById('adminLogSection');
+                    if (target) target.outerHTML = sectionHtml;
+                }).catch(e => {
+                    const target = document.getElementById('adminLogSection');
+                    if (target) target.innerHTML = '操作日志加载失败，不影响其他后台功能。';
+                });
+            }, 300);
             } catch(e) {
                 if (adminContent) {
                     adminContent.innerHTML = `<div class="admin-section" style="color:#c00;line-height:1.7;">后台加载失败：${escapeHtml(e.message || String(e))}<br>请刷新后重试，或先确认 Supabase 表字段已经执行最新 SQL。</div>`;
@@ -2872,7 +2877,7 @@
             const allowLocalFallback = options.allowLocalFallback !== false;
             try {
                 let users = {};
-                if (isAdmin || options.includeAll) {
+                if (options.includeAll) {
                     const result = await accountApi('listUsers');
                     users = userArrayToMap(result.users || []);
                 } else {
@@ -2964,7 +2969,25 @@
             document.getElementById('registerModal').style.display='flex';
         }
         async function openAdminPanel() {
-            if (!(await requireAdmin())) return;
+            if (isAdmin && currentUserInfo) {
+                document.getElementById('adminPanel').style.display = 'block';
+                document.getElementById('adminContent').innerHTML = '<div class="admin-section" style="color:#888;">后台正在加载...</div>'; 
+                renderAdminData();
+                forceRefreshUserData({ allowLocalFallback: false }).then(users => {
+                    const userInfo = users[currentUser];
+                    const stillAdmin = !!(userInfo && ((currentUser === 'admin') || userInfo.role === 'admin'));
+                    if (!stillAdmin) {
+                        isAdmin = false;
+                        updateAdminVisibility();
+                        closeAdminPanel();
+                        alert('无权限：只有管理员可以操作这里');
+                    }
+                }).catch(e => console.warn('后台权限后台复核失败:', e));
+                return;
+            }
+            document.getElementById('adminPanel').style.display = 'block';
+            document.getElementById('adminContent').innerHTML = '<div class="admin-section" style="color:#888;">正在确认管理员权限...</div>'; 
+            if (!(await requireAdmin())) { closeAdminPanel(); return; }
             document.getElementById('adminPanel').style.display = 'block';
             renderAdminData();
         }
