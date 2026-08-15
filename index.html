@@ -2692,17 +2692,21 @@
             let newName = document.getElementById('newUsername').value.trim(); 
             let newPwd = document.getElementById('newUserPwd').value.trim(); 
             if(!newName || !newPwd) { alert('请填写账号和密码'); return; } 
+            const btn = document.querySelector('#registerModal .submit-btn');
+            if (btn) { btn.disabled = true; btn.innerText = '正在注册...'; }
             try { 
                 await accountApi('createUser', { username: newName, password: newPwd }); 
             } catch(e) { 
                 alert('注册失败：' + e.message);
+                if (btn) { btn.disabled = false; btn.innerText = '注册'; }
                 return;
             }
-            alert(`账号 ${newName} 注册成功！`); 
             document.getElementById('newUsername').value = ''; 
             document.getElementById('newUserPwd').value = ''; 
             closeModalById('registerModal'); 
-            if(isAdmin) renderAdminData(); 
+            if(isAdmin) await renderAdminData(); 
+            if (btn) { btn.disabled = false; btn.innerText = '注册'; }
+            alert(`账号 ${newName} 注册成功，已经在后台列表刷新。`); 
         }
         function closeAdminPanel() { 
             document.getElementById('adminPanel').style.display = 'none'; 
@@ -3031,12 +3035,19 @@
             if (!username) { alert('用户不存在'); return; }
             if (newPassword !== confirm) { alert('两次新密码不一致'); return; }
             if (newPassword.length < 4) { alert('密码至少4位'); return; }
+            const btn = document.querySelector('#setUserPasswordModal .submit-btn');
+            if (btn) { btn.disabled = true; btn.innerText = '正在保存...'; }
             try {
                 await accountApi('setUserPassword', { username, newPassword });
                 logAction('admin_reset_pwd', { username: username });
                 closeModalById('setUserPasswordModal');
-                alert(`${username} 的密码已更新`);
-            } catch(e) { alert('设置密码失败：' + e.message); }
+                await renderAdminData();
+                alert(`${username} 的密码已更新，已经立即生效。`);
+            } catch(e) { 
+                alert('设置密码失败：' + e.message); 
+            } finally {
+                if (btn) { btn.disabled = false; btn.innerText = '保存新密码'; }
+            }
         }
         async function autoLogin() {
             let savedUser = localStorage.getItem('couple_logged_user');
