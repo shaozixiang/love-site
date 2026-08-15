@@ -3,7 +3,12 @@ const ALLOWED_FOLDERS = new Set(['common', 'feeds', 'messages', 'bubbles', 'avat
 
 export async function onRequest(context) {
   const { request, env } = context;
-  const headers = corsHeaders();
+  const originCheck = checkAllowedOrigin(request.headers.get('Origin') || '', env.UPLOAD_ALLOWED_ORIGINS);
+  const headers = corsHeaders(originCheck.corsOrigin);
+
+  if (!originCheck.allowed) {
+    return jsonResponse({ error: 'Upload origin is not allowed.' }, 403, headers);
+  }
 
   if (request.method === 'OPTIONS') {
     return new Response(null, { status: 204, headers });
@@ -76,12 +81,29 @@ export async function onRequest(context) {
   }
 }
 
-function corsHeaders() {
-  return {
-    'Access-Control-Allow-Origin': '*',
+function corsHeaders(origin) {
+  const headers = {
     'Access-Control-Allow-Methods': 'POST, OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type'
+    'Access-Control-Allow-Headers': 'Content-Type',
+    'Vary': 'Origin'
   };
+  if (origin) headers['Access-Control-Allow-Origin'] = origin;
+  return headers;
+}
+
+function checkAllowedOrigin(origin, allowedOriginsConfig) {
+  const allowedOrigins = parseAllowedOrigins(allowedOriginsConfig);
+  if (allowedOrigins.length === 0) return { allowed: true, corsOrigin: '*' };
+  if (!origin) return { allowed: true, corsOrigin: allowedOrigins[0] };
+  const allowed = allowedOrigins.includes(origin);
+  return { allowed, corsOrigin: allowed ? origin : '' };
+}
+
+function parseAllowedOrigins(value) {
+  return String(value || '')
+    .split(',')
+    .map(item => item.trim())
+    .filter(Boolean);
 }
 
 function jsonResponse(payload, status, headers) {
