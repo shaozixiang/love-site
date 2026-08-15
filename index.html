@@ -468,6 +468,7 @@
     <div id="avatarModal" class="modal-overlay"><div class="modal-card"><span class="close-modal" onclick="closeModalById('avatarModal')">&times;</span><h3>📸 修改头像</h3><input type="file" id="avatarInput" accept="image/*"><button class="submit-btn" onclick="updateAvatar()">保存头像</button></div></div>
     <div id="passwordModal" class="modal-overlay"><div class="modal-card"><span class="close-modal" onclick="closeModalById('passwordModal')">&times;</span><h3>🔐 修改密码</h3><input type="password" id="oldPwd" placeholder="原密码"><input type="password" id="newPwd" placeholder="新密码"><input type="password" id="confirmPwd" placeholder="确认新密码"><button class="submit-btn" onclick="changePassword()">确认修改</button></div></div>
     <div id="registerModal" class="modal-overlay"><div class="modal-card"><span class="close-modal" onclick="closeModalById('registerModal')">&times;</span><h3>📝 注册新账号</h3><input type="text" id="newUsername" placeholder="账号 (boy/girl风格)"><input type="password" id="newUserPwd" placeholder="密码"><button class="submit-btn" onclick="registerNewUser()">注册</button></div></div>
+    <div id="setUserPasswordModal" class="modal-overlay"><div class="modal-card"><span class="close-modal" onclick="closeModalById('setUserPasswordModal')">&times;</span><h3>🔐 设置账号密码</h3><input type="text" id="setPwdUsername" placeholder="账号" readonly><input type="password" id="setPwdNew" placeholder="新密码"><input type="password" id="setPwdConfirm" placeholder="确认新密码"><button class="submit-btn" onclick="setUserPassword()">保存新密码</button></div></div>
     <div id="adminPanel" class="admin-panel"><div class="admin-container"><div class="admin-title"><h2>🔧 情侣小站 · 后台管理</h2><div><button class="admin-btn success" onclick="showRegisterModal()">➕ 注册新账号</button><button class="admin-btn" onclick="closeAdminPanel()">关闭后台</button></div></div><div class="mode-selector"><label>📦 相册存储模式：</label><select id="adminStorageModeSelect" onchange="adminSetStorageMode()"><option value="cloud">☁️ 图床模式（无限容量）</option><option value="local">💾 本地存储（测试用）</option></select></div><div id="adminContent"></div></div></div>
     <div class="image-modal" id="imageModal" onclick="closeModal()">
         <span class="close-modal-icon" onclick="closeModal()">&times;</span>
@@ -691,6 +692,7 @@
             return nameMatch ? nameMatch[1] : 'bin';
         }
         let bubbleClicked = 0, currentUser = '', isAdmin = false, storageMode = 'cloud', map = null, markers = [], currentTab = 'message';
+        let currentUserInfo = null;
         let lastUserSyncError = null;
         let lastPermissionError = null;
         const START_DATE = new Date(2023, 11, 12);
@@ -713,17 +715,32 @@
         const ONLINE_STATUS_INTERVAL_MS = 5 * 60 * 1000;
         const LOG_LOCAL_LIMIT = 300;
         const LOG_REMOTE_ACTIONS = new Set([
-            'login', 'login_new_device', 'login_known_device', 'logout', 'login_failed',
             'admin_delete', 'admin_reset_pwd', 'admin_delete_user', 'admin_create_user',
             'admin_toggle_role', 'admin_set_permission', 'admin_toggle_visibility',
-            'update_avatar', 'change_password',
             'publish_feed', 'publish_message', 'publish_love', 'publish_memory',
             'publish_memo', 'publish_schedule', 'publish_countdown', 'publish_marker'
         ]);
-        const DEVICE_ID_KEY = 'couple_client_device_id';
-        const DEVICE_LOGIN_PREFIX = 'couple_login_device_';
         const sectionLoadedAt = {};
-        function selectUserAuthRows() { return 'username,password,permission,role'; }
+        function selectUserAuthRows() { return 'username,avatar,permission,role,last_active,is_online'; }
+        function getSessionToken() { return localStorage.getItem('couple_session_token') || ''; }
+        function setSession(username, sessionToken) { localStorage.setItem('couple_logged_user', username); localStorage.setItem('couple_session_token', sessionToken); }
+        function clearSession() { localStorage.removeItem('couple_logged_user'); localStorage.removeItem('couple_session_token'); }
+        async function accountApi(action, payload = {}) {
+            if (window.location.protocol === 'file:') throw new Error('账号安全接口 /api/account 只在部署到 Cloudflare Pages 或 Vercel 后可用，不能直接双击本地 HTML 登录。');
+            const response = await fetch('/api/account', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ action, sessionToken: getSessionToken(), ...payload })
+            });
+            const result = await response.json().catch(() => ({}));
+            if (!response.ok) throw new Error(result.error || '账号接口请求失败');
+            return result;
+        }
+        function userArrayToMap(list = []) {
+            const map = {};
+            (list || []).forEach(user => { if (user && user.username) map[user.username] = normalizeUserInfo(user.username, user); });
+            return map;
+        }
         function selectContentRows(table, columns, options = {}) {
             let query = sb.from(table).select(columns);
             if (!isAdmin && !isCoupleAccount()) query = query.or('visibility.is.null,visibility.eq.public');
@@ -1010,7 +1027,7 @@
             try { await sb.from('feeds').delete().eq('id', id); } catch(e) { console.error(e); }
             // 记录删除日志
             logAction('delete_feed', { feed_id: id });
-            await renderFeeds({ force: true }); 
+            renderFeeds(); 
         }
         
         // ========== 动态点赞功能 ==========
@@ -1879,12 +1896,7 @@
             localStorage.setItem('last_activity', Date.now().toString());
             if (Date.now() - lastActivityWrite < ONLINE_STATUS_INTERVAL_MS) return;
             lastActivityWrite = Date.now();
-            try {
-                await sb.from('users').update({ 
-                    last_active: new Date().toISOString(),
-                    is_online: true
-                }).eq('username', currentUser);
-            } catch(e) {}
+            try { await accountApi('updateActivity'); } catch(e) {}
         }
         
         function startHeartbeat() {
@@ -1922,13 +1934,7 @@
         async function updateOnlineStatus() {
             if (!currentUser || currentUser === 'admin') return;
             try {
-                const { data } = await sb.from('users').select('username,last_active,is_online');
-                if (!data) return;
-                
-                let targetUsername = currentUser === 'boy' ? 'girl' : (currentUser === 'girl' ? 'boy' : null);
-                if (!targetUsername) return;
-                
-                const otherUser = data.find(u => u.username === targetUsername);
+                const { user: otherUser } = await accountApi('onlineStatus');
                 if (!otherUser) return;
                 
                 const lastActive = otherUser.last_active ? new Date(otherUser.last_active) : null;
@@ -1967,7 +1973,7 @@
             const adminContent = document.getElementById('adminContent');
             if (adminContent) adminContent.innerHTML = '<div class="admin-section" style="color:#888;">后台正在加载...</div>'; 
             try {
-            html += `<div class="admin-section"><h3>👥 用户管理 · 权限设置</h3><table class="data-table"><thead><tr><th>账号</th><th>密码</th><th>角色</th><th>权限</th><th>操作</th></tr></thead><tbody>`; 
+            html += `<div class="admin-section"><h3>👥 用户管理 · 权限设置</h3><table class="data-table"><thead><tr><th>账号</th><th>角色</th><th>权限</th><th>操作</th></tr></thead><tbody>`; 
             let users = await loadUserData();
             
             for(let [uname, info] of Object.entries(users)) { 
@@ -1979,11 +1985,10 @@
                 
                 html += `<tr>
                     <td>${uname}</td>
-                    <td>${info.pwd}</td>
                     <td>${roleLabel}</td>
                     <td>${isAdminUser ? '👑 不受限制' : permLabel}</td>
                     <td>
-                        <button class="admin-btn" onclick="resetUserPwd('${uname}')">重置密码</button>
+                        <button class="admin-btn" onclick="openSetUserPasswordModal('${uname}')">设置密码</button>
                         ${uname === 'admin' ? '' : `<button class="admin-btn" onclick="toggleUserRole('${uname}')">${isAdminUser ? '取消管理员' : '设为管理员'}</button>`}
                         ${isAdminUser ? '' : `
                             <div style="margin-top:5px;">
@@ -2017,6 +2022,157 @@
                 }
             }
             return;
+            
+            try {
+                const { data: feeds } = await sb.from('feeds').select('id,description,author_name,created_at,visibility').order('created_at', { ascending: false }).limit(ADMIN_LIMIT);
+                html += `<div class="admin-section"><h3>📸 时光相册动态 (${feeds ? feeds.length : 0}条)</h3><table class="data-table"><thead><tr><th>描述</th><th>作者</th><th>时间</th><th>可见性</th><th>操作</th></tr></thead><tbody>`; 
+                if (feeds) for(let f of feeds) { 
+                    html += `<tr><td>${escapeHtml(f.description || '').substring(0,30)}</td><td>${f.author_name}</td><td>${new Date(f.created_at).toLocaleString()}</td><td>${renderVisibilityAdminControls('feed', f.id, f.visibility)}</td><td><button class="admin-btn danger" onclick="deleteFeed('${f.id}')">删除</button></td></tr>`; 
+                }
+                html += `</tbody></table></div>`;
+            } catch(e) {}
+            
+            // 💬 留言板管理
+            try {
+                const { data: messages } = await sb.from('messages').select('id,content,author_name,created_at,visibility').order('created_at', { ascending: false }).limit(ADMIN_LIMIT);
+                html += `<div class="admin-section"><h3>💬 留言板 (${messages ? messages.length : 0}条)</h3><table class="data-table"><thead><tr><th>内容</th><th>作者</th><th>时间</th><th>可见性</th><th>操作</th></tr></thead><tbody>`;
+                if (messages) for(let m of messages) {
+                    html += `<tr><td>${escapeHtml(m.content || '').substring(0,30)}</td><td>${m.author_name}</td><td>${new Date(m.created_at).toLocaleString()}</td><td>${renderVisibilityAdminControls('message', m.id, m.visibility)}</td><td><button class="admin-btn danger" onclick="adminDelete('message', '${m.id}')">删除</button></td></tr>`;
+                }
+                html += `</tbody></table></div>`;
+            } catch(e) {}
+            
+            // 💌 感动的话管理
+            try {
+                const { data: loves } = await sb.from('loves').select('id,content,author_name,privacy,created_at,visibility').order('created_at', { ascending: false }).limit(ADMIN_LIMIT);
+                html += `<div class="admin-section"><h3>💌 感动的话 (${loves ? loves.length : 0}条)</h3><table class="data-table"><thead><tr><th>内容</th><th>作者</th><th>隐私</th><th>时间</th><th>可见性</th><th>操作</th></tr></thead><tbody>`;
+                if (loves) for(let l of loves) {
+                    html += `<tr><td>${escapeHtml(l.content || '').substring(0,30)}</td><td>${l.author_name}</td><td>${l.privacy === 'private' ? '🔒 私密' : '公开'}</td><td>${new Date(l.created_at).toLocaleString()}</td><td>${renderVisibilityAdminControls('love', l.id, l.visibility)}</td><td><button class="admin-btn danger" onclick="adminDelete('love', '${l.id}')">删除</button></td></tr>`;
+                }
+                html += `</tbody></table></div>`;
+            } catch(e) {}
+            
+            // ✨ 一起做过的事管理
+            try {
+                const { data: memories } = await sb.from('memories').select('id,content,author_name,created_at,visibility').order('created_at', { ascending: false }).limit(ADMIN_LIMIT);
+                html += `<div class="admin-section"><h3>✨ 一起做过的事 (${memories ? memories.length : 0}条)</h3><table class="data-table"><thead><tr><th>内容</th><th>作者</th><th>时间</th><th>可见性</th><th>操作</th></tr></thead><tbody>`;
+                if (memories) for(let mem of memories) {
+                    html += `<tr><td>${escapeHtml(mem.content || '').substring(0,30)}</td><td>${mem.author_name}</td><td>${new Date(mem.created_at).toLocaleString()}</td><td>${renderVisibilityAdminControls('memory', mem.id, mem.visibility)}</td><td><button class="admin-btn danger" onclick="adminDelete('memory', '${mem.id}')">删除</button></td></tr>`;
+                }
+                html += `</tbody></table></div>`;
+            } catch(e) {}
+            
+            // 📋 待办备忘录管理
+            try {
+                const { data: memos } = await sb.from('memos').select('id,content,author_name,priority,done,created_at,visibility').order('created_at', { ascending: false }).limit(ADMIN_LIMIT);
+                html += `<div class="admin-section"><h3>📋 待办备忘录 (${memos ? memos.length : 0}条)</h3><table class="data-table"><thead><tr><th>内容</th><th>作者</th><th>优先级</th><th>状态</th><th>可见性</th><th>操作</th></tr></thead><tbody>`;
+                if (memos) for(let memo of memos) {
+                    const priorityLabels = { high: '🔴 高', medium: '🟡 中', low: '🟢 低' };
+                    html += `<tr><td>${escapeHtml(memo.content || '').substring(0,30)}</td><td>${memo.author_name}</td><td>${priorityLabels[memo.priority] || memo.priority}</td><td>${memo.done ? '✅ 已完成' : '⏳ 进行中'}</td><td>${renderVisibilityAdminControls('memo', memo.id, memo.visibility)}</td><td><button class="admin-btn danger" onclick="adminDelete('memo', '${memo.id}')">删除</button></td></tr>`;
+                }
+                html += `</tbody></table></div>`;
+            } catch(e) {}
+            
+            // 📝 行程管理
+            try {
+                const { data: schedules } = await sb.from('schedules').select('id,title,start_date,end_date,author_name,created_at,visibility').order('created_at', { ascending: false }).limit(ADMIN_LIMIT);
+                html += `<div class="admin-section"><h3>📝 行程安排 (${schedules ? schedules.length : 0}条)</h3><table class="data-table"><thead><tr><th>标题</th><th>日期</th><th>作者</th><th>可见性</th><th>操作</th></tr></thead><tbody>`;
+                if (schedules) for(let s of schedules) {
+                    let dateRange = s.start_date ? (s.end_date ? `${s.start_date} ~ ${s.end_date}` : s.start_date) : '';
+                    html += `<tr><td>${escapeHtml(s.title || '').substring(0,20)}</td><td>${dateRange}</td><td>${s.author_name}</td><td>${renderVisibilityAdminControls('schedule', s.id, s.visibility)}</td><td><button class="admin-btn danger" onclick="adminDelete('schedule', '${s.id}')">删除</button></td></tr>`;
+                }
+                html += `</tbody></table></div>`;
+            } catch(e) {}
+            
+            // ⏰ 纪念日倒计时管理
+            try {
+                const { data: countdowns } = await sb.from('countdowns').select('id,name,target_date,author_name,created_at,visibility').order('created_at', { ascending: false }).limit(ADMIN_LIMIT);
+                html += `<div class="admin-section"><h3>⏰ 纪念日倒计时 (${countdowns ? countdowns.length : 0}条)</h3><table class="data-table"><thead><tr><th>标题</th><th>目标日期</th><th>作者</th><th>可见性</th><th>操作</th></tr></thead><tbody>`;
+                if (countdowns) for(let c of countdowns) {
+                    html += `<tr><td>${escapeHtml(c.name || '').substring(0,20)}</td><td>${c.target_date || ''}</td><td>${c.author_name}</td><td>${renderVisibilityAdminControls('countdown', c.id, c.visibility)}</td><td><button class="admin-btn danger" onclick="adminDelete('countdown', '${c.id}')">删除</button></td></tr>`;
+                }
+                html += `</tbody></table></div>`;
+            } catch(e) {}
+            
+            // 🗺️ 旅行地图标记管理
+            try {
+                const { data: markers } = await sb.from('travel_markers').select('id,name,description,author_name,created_at,visibility').order('created_at', { ascending: false }).limit(ADMIN_LIMIT);
+                html += `<div class="admin-section"><h3>🗺️ 旅行地图标记 (${markers ? markers.length : 0}个)</h3><table class="data-table"><thead><tr><th>名称</th><th>描述</th><th>作者</th><th>可见性</th><th>操作</th></tr></thead><tbody>`;
+                if (markers) for(let mk of markers) {
+                    html += `<tr><td>${escapeHtml(mk.name || '').substring(0,15)}</td><td>${escapeHtml(mk.description || '').substring(0,20)}</td><td>${mk.author_name}</td><td>${renderVisibilityAdminControls('marker', mk.id, mk.visibility)}</td><td><button class="admin-btn danger" onclick="adminDelete('marker', '${mk.id}')">删除</button></td></tr>`;
+                }
+                html += `</tbody></table></div>`;
+            } catch(e) {}
+            
+            // 📋 操作日志管理
+            try {
+                const logs = await getAdminLogs();
+                const actionLabels = {
+                    'login': '🔐 用户登录',
+                    'logout': '🚪 用户登出',
+                    'login_failed': '❌ 登录失败',
+                    'publish_feed': '📸 发布相册',
+                    'publish_message': '💬 发布留言',
+                    'publish_love': '💌 发布感动',
+                    'publish_memory': '✨ 添加回忆',
+                    'publish_memo': '📋 添加待办',
+                    'publish_schedule': '📝 添加行程',
+                    'publish_countdown': '⏰ 添加纪念日',
+                    'publish_marker': '🗺️ 添加地图标记',
+                    'delete_feed': '🗑️ 删除相册',
+                    'delete_message': '🗑️ 删除留言',
+                    'delete_love': '🗑️ 删除感动',
+                    'delete_memory': '🗑️ 删除回忆',
+                    'delete_memo': '🗑️ 删除待办',
+                    'delete_schedule': '🗑️ 删除行程',
+                    'delete_countdown': '🗑️ 删除纪念日',
+                    'delete_marker': '🗑️ 删除地图标记',
+                    'like_feed': '❤️ 点赞动态',
+                    'unlike_feed': '💔 取消点赞动态',
+                    'like_message': '❤️ 点赞留言',
+                    'unlike_message': '💔 取消点赞留言',
+                    'comment_feed': '💬 评论动态',
+                    'comment_message': '💬 评论留言',
+                    'delete_comment_feed': '🗑️ 删除动态评论',
+                    'delete_comment_message': '🗑️ 删除留言评论',
+                    'update_avatar': '🖼️ 更新头像',
+                    'change_password': '🔑 修改密码',
+                    'angry_on': '😠 开启生气模式',
+                    'angry_off': '😊 关闭生气模式',
+                    'apology_submit': '💌 提交道歉信',
+                    'apology_pass': '✅ 道歉信通过',
+                    'apology_reject': '❌ 道歉信驳回',
+                    'admin_delete': '🔧 管理员删除',
+                    'admin_reset_pwd': '🔧 管理员重置密码',
+                    'admin_delete_user': '🔧 管理员删除账号',
+                    'admin_create_user': '🔧 管理员创建账号',
+                    'admin_toggle_role': '🔧 切换用户角色',
+                    'admin_set_permission': '🔧 设置用户权限',
+                    'admin_toggle_visibility': '🔒 切换对外可见性',
+                    'view_page': '👁️ 浏览页面',
+                    'switch_tab': '🔄 切换标签页'
+                };
+                
+                html += `<div class="admin-section"><h3>📋 操作日志 (${logs ? logs.length : 0}条)</h3><div style="max-height:400px;overflow-y:auto;"><table class="data-table"><thead><tr><th>时间</th><th>用户</th><th>操作</th><th>详情</th></tr></thead><tbody>`;
+                if (logs && logs.length > 0) {
+                    for(let log of logs.slice(0, 50)) {
+                        let details = '';
+                        try {
+                            const parsed = JSON.parse(log.details);
+                            details = Object.entries(parsed).map(([k, v]) => `${k}: ${String(v).substring(0, 20)}`).join(', ');
+                        } catch(e) {
+                            details = log.details ? String(log.details).substring(0, 30) : '';
+                        }
+                        const actionLabel = actionLabels[log.action] || log.action;
+                        html += `<tr><td style="font-size:11px;white-space:nowrap;">${new Date(log.created_at).toLocaleString()}</td><td>${log.user}</td><td>${actionLabel}</td><td style="font-size:11px;color:#666;">${escapeHtml(details)}</td></tr>`;
+                    }
+                } else {
+                    html += `<tr><td colspan="4" style="text-align:center;color:#999;padding:20px;">暂无日志记录</td></tr>`;
+                }
+                html += `</tbody></table></div></div>`;
+            } catch(e) {}
+            
+            document.getElementById('adminContent').innerHTML = html; 
         }
         
         function renderQqSyncPanel() {
@@ -2282,8 +2438,6 @@
         async function renderAdminLogSection() {
             const logs = await getAdminLogs();
             const actionLabels = {
-                'login_new_device': '🆕 新设备登录',
-                'login_known_device': '🔁 常用设备登录',
                 login: '🔐 用户登录', logout: '🚪 用户登出', login_failed: '❌ 登录失败', publish_feed: '📸 发布相册', publish_message: '💬 发布留言',
                 publish_love: '💌 发布感动', publish_memory: '✨ 添加回忆', publish_memo: '📋 添加待办', publish_schedule: '📝 添加行程',
                 publish_countdown: '⏰ 添加纪念日', publish_marker: '🗺️ 添加地图标记', admin_delete: '🔧 管理员删除',
@@ -2324,7 +2478,6 @@
                 // 记录管理员删除日志
                 logAction('admin_delete', { type: type, id: id });
                 renderAdminData();
-                if (type === 'feed') await renderFeeds({ force: true });
             } catch(e) {
                 alert('删除失败: ' + e.message);
             }
@@ -2342,29 +2495,16 @@
         }
         function normalizeUserInfo(username, info = {}) {
             return {
-                pwd: info.pwd || info.password || 'love1314',
                 avatar: info.avatar || '',
                 permission: ['view', 'comment', 'full'].includes(info.permission) ? info.permission : 'full',
                 role: (info.role === 'admin' || username === 'admin') ? 'admin' : 'user'
             };
-        }
-        function buildUserRow(username, info = {}) {
-            const normalized = normalizeUserInfo(username, info);
-            const row = {
-                username,
-                password: normalized.pwd,
-                permission: normalized.permission,
-                role: normalized.role
-            };
-            if (normalized.avatar) row.avatar = normalized.avatar;
-            return row;
         }
         function getCacheSafeUsers(users) {
             const normalized = normalizeUsers(users);
             const cacheSafe = {};
             for (let [username, info] of Object.entries(normalized)) {
                 cacheSafe[username] = {
-                    pwd: info.pwd,
                     avatar: '',
                     permission: info.permission,
                     role: info.role
@@ -2385,7 +2525,7 @@
         function cacheUsersLocally(users) {
             return safeSetLocalStorage('couple_users', JSON.stringify(getCacheSafeUsers(users)));
         }
-        function loadCachedUsers(defaultUsers) {
+        function loadCachedUsers(defaultUsers = {}) {
             try {
                 const cached = localStorage.getItem('couple_users');
                 return cached ? normalizeUsers(JSON.parse(cached)) : defaultUsers;
@@ -2398,76 +2538,24 @@
         
         // ========== 管理员操作日志功能 ==========
         // 记录操作日志（优先存云端，失败则存本地）
-        function getClientDeviceId() {
-            try {
-                let deviceId = localStorage.getItem(DEVICE_ID_KEY);
-                if (!deviceId) {
-                    let randomPart = Math.random().toString(36).slice(2, 10);
-                    if (window.crypto && crypto.getRandomValues) {
-                        const randomValues = new Uint32Array(2);
-                        crypto.getRandomValues(randomValues);
-                        randomPart = Array.from(randomValues).map(n => n.toString(36)).join('').slice(0, 12);
-                    }
-                    deviceId = `device_${Date.now().toString(36)}_${randomPart}`;
-                    safeSetLocalStorage(DEVICE_ID_KEY, deviceId);
-                }
-                return deviceId;
-            } catch(e) {
-                return `session_${Date.now().toString(36)}`;
-            }
-        }
-        function getDeviceLoginKey(username) {
-            return DEVICE_LOGIN_PREFIX + String(username || 'guest').replace(/[^a-z0-9_-]/gi, '_');
-        }
-        function readLoginDeviceIds(username) {
-            try {
-                const parsed = JSON.parse(localStorage.getItem(getDeviceLoginKey(username)) || '[]');
-                return Array.isArray(parsed) ? parsed.filter(Boolean) : [];
-            } catch(e) {
-                return [];
-            }
-        }
-        function getLoginDeviceState(username) {
-            const deviceId = getClientDeviceId();
-            const knownDevices = readLoginDeviceIds(username);
-            const isKnown = knownDevices.includes(deviceId);
-            return {
-                deviceId,
-                isNewDevice: !isKnown,
-                scope: isKnown ? 'known_device' : (knownDevices.length ? 'new_device' : 'first_device'),
-                knownDeviceCount: knownDevices.length
-            };
-        }
-        function rememberLoginDevice(username, deviceId) {
-            if (!username || !deviceId) return;
-            const knownDevices = readLoginDeviceIds(username).filter(id => id !== deviceId);
-            knownDevices.unshift(deviceId);
-            safeSetLocalStorage(getDeviceLoginKey(username), JSON.stringify(knownDevices.slice(0, 20)));
-        }
-        function getDeviceLabel() {
-            const screenSize = window.screen ? `${window.screen.width}x${window.screen.height}` : 'unknown';
-            return `${navigator.platform || 'unknown'} | ${screenSize}`;
-        }
-        function buildLogDetails(details = {}) {
-            const screenSize = window.screen ? `${window.screen.width}x${window.screen.height}` : 'unknown';
-            const envInfo = {
-                device_id: getClientDeviceId(),
-                device_label: getDeviceLabel(),
-                user_agent: navigator.userAgent.substring(0, 100),
-                platform: navigator.platform,
-                language: navigator.language,
-                screen_size: screenSize,
-                page_url: window.location.href.substring(0, 100),
-                current_tab: currentTab || 'unknown'
-            };
-            return {
-                ...envInfo,
-                ...(typeof details === 'string' ? { message: details } : details)
-            };
-        }
         async function logAction(action, details = {}) {
             try {
-                const fullDetails = buildLogDetails(details);
+                // 收集设备和环境信息
+                const envInfo = {
+                    user_agent: navigator.userAgent.substring(0, 100),
+                    platform: navigator.platform,
+                    language: navigator.language,
+                    screen_size: `${screen.width}x${screen.height}`,
+                    page_url: window.location.href.substring(0, 100),
+                    current_tab: currentTab || 'unknown'
+                };
+                
+                // 合并详情信息
+                const fullDetails = {
+                    ...envInfo,
+                    ...(typeof details === 'string' ? { message: details } : details)
+                };
+                
                 const logData = {
                     action: action,
                     user: currentUser || 'guest',
@@ -2475,22 +2563,28 @@
                     created_at: new Date().toISOString()
                 };
                 
+                // 先立即存到本地，确保日志不丢失
                 try {
                     let localLogs = JSON.parse(localStorage.getItem('admin_logs') || '[]');
                     localLogs.unshift(logData);
+                    // 本地保留最近日志，后台会和云端日志合并展示
                     if (localLogs.length > LOG_LOCAL_LIMIT) localLogs = localLogs.slice(0, LOG_LOCAL_LIMIT);
                     localStorage.setItem('admin_logs', JSON.stringify(localLogs));
                 } catch(e) {
-                    console.error('淇濆瓨鏈湴鏃ュ織澶辫触:', e);
+                    console.error('保存本地日志失败:', e);
                 }
                 
+                // 异步尝试存到 Supabase（不阻塞）
                 if (LOG_REMOTE_ACTIONS.has(action)) {
                     try { await sb.from('admin_logs').insert(logData); } catch(e) {}
                 }
             } catch(e) {
-                console.error('璁板綍鏃ュ織澶辫触:', e);
+                console.error('记录日志失败:', e);
             }
-        }        function readLocalAdminLogs() {
+        }
+        
+        // 获取日志列表
+        function readLocalAdminLogs() {
             try {
                 const logs = JSON.parse(localStorage.getItem('admin_logs') || '[]');
                 return Array.isArray(logs) ? logs : [];
@@ -2563,9 +2657,8 @@
             if(!file) return; 
             try {
                 const avatarData = await resizeAvatarImage(file);
-                let users = await loadUserData(); 
-                if(users[currentUser]) users[currentUser].avatar = avatarData; 
-                await saveUsers(users);
+                const result = await accountApi('updateAvatar', { avatar: avatarData });
+                currentUserInfo = result.user || { ...(currentUserInfo || {}), avatar: avatarData };
                 document.getElementById('userAvatarImg').src = avatarData; 
                 closeModalById('avatarModal'); 
                 logAction('update_avatar', { file_name: file.name, file_size: file.size });
@@ -2577,38 +2670,30 @@
         async function changePassword() { 
             let old = document.getElementById('oldPwd').value, 
                 newPwd = document.getElementById('newPwd').value, 
-                confirm = document.getElementById('confirmPwd').value, 
-                users = await loadUserData(); 
-            if(!users[currentUser] || users[currentUser].pwd !== old) { 
-                // 记录修改密码失败日志
-                logAction('change_password', { success: false, reason: '原密码错误' });
-                alert('原密码错误'); 
-                return; 
-            } 
+                confirm = document.getElementById('confirmPwd').value; 
             if(newPwd !== confirm) { alert('两次新密码不一致'); return; } 
             if(newPwd.length < 4) { alert('密码至少4位'); return; } 
-            users[currentUser].pwd = newPwd; 
-            try { await saveUsers(users); } catch(e) { alert('密码同步到云端失败：' + e.message); return; }
-            // 记录修改密码成功日志
-            logAction('change_password', { success: true });
-            alert('密码修改成功，请重新登录'); 
-            logout(); 
+            try { 
+                await accountApi('changePassword', { oldPassword: old, newPassword: newPwd });
+                logAction('change_password', { success: true });
+                alert('密码修改成功，请重新登录'); 
+                logout(); 
+            } catch(e) { 
+                logAction('change_password', { success: false, reason: e.message });
+                alert(e.message || '密码修改失败'); 
+            }
         }
         async function registerNewUser() { 
             let newName = document.getElementById('newUsername').value.trim(); 
             let newPwd = document.getElementById('newUserPwd').value.trim(); 
             if(!newName || !newPwd) { alert('请填写账号和密码'); return; } 
-            let users = await loadUserData(); 
-            if(users[newName]) { alert('账号已存在'); return; } 
-            users[newName] = { pwd: newPwd, avatar: '', permission: 'full', role: 'user' }; 
             try { 
-                await saveUsers(users); 
+                await accountApi('createUser', { username: newName, password: newPwd }); 
             } catch(e) { 
-                alert('注册失败：账号没有同步到云端。请先检查 Supabase users 表是否已运行 docs/supabase-permissions.sql。\n\n错误：' + e.message);
+                alert('注册失败：' + e.message);
                 return;
             }
-                        logAction('admin_create_user', { username: newName, permission: 'full', role: 'user' });
-alert(`账号 ${newName} 注册成功！`); 
+            alert(`账号 ${newName} 注册成功！`); 
             document.getElementById('newUsername').value = ''; 
             document.getElementById('newUserPwd').value = ''; 
             closeModalById('registerModal'); 
@@ -2640,10 +2725,17 @@ alert(`账号 ${newName} 注册成功！`);
         }
         function openAvatarModal(){ document.getElementById('avatarModal').style.display='flex'; }
         function openPasswordModal(){ document.getElementById('passwordModal').style.display='flex'; }
+        function openSetUserPasswordModal(username){
+            document.getElementById('setPwdUsername').value = username;
+            document.getElementById('setPwdNew').value = '';
+            document.getElementById('setPwdConfirm').value = '';
+            document.getElementById('setUserPasswordModal').style.display='flex';
+        }
         function closeModalById(id){ document.getElementById(id).style.display='none'; }
-        function logout(){ 
+        async function logout(){ 
             // 记录登出日志
             logAction('logout', { username: currentUser });
+            try { await accountApi('logout'); } catch(e) {}
             
             stopBubbleGenerator(); 
             clearAllDreamBubbles(); 
@@ -2652,8 +2744,9 @@ alert(`账号 ${newName} 注册成功！`);
             document.getElementById('mainPage').style.display='none'; 
             document.getElementById('loginPage').style.display='flex'; 
             currentUser=''; 
+            currentUserInfo=null; 
             isAdmin=false; 
-            localStorage.removeItem('couple_logged_user');
+            clearSession();
         }
         
         // ========== 自动登录与秒级登录核心逻辑 ==========
@@ -2772,67 +2865,42 @@ alert(`账号 ${newName} 注册成功！`);
         }
         async function loadCurrentUserAvatar() {
             if (!currentUser) return;
-            try {
-                const { data, error } = await sb.from('users').select('avatar').eq('username', currentUser).maybeSingle();
-                if (!error && data && data.avatar) document.getElementById('userAvatarImg').src = data.avatar;
-            } catch(e) {}
+            const avatar = currentUserInfo && currentUserInfo.avatar;
+            if (avatar) document.getElementById('userAvatarImg').src = avatar;
         }
         async function forceRefreshUserData(options = {}) {
             const allowLocalFallback = options.allowLocalFallback !== false;
-            const defaultUsers = {"boy":{"pwd":"love1314","avatar":"","permission":"full","role":"user"},"girl":{"pwd":"love1314","avatar":"","permission":"full","role":"user"},"admin":{"pwd":"admin123","avatar":"","permission":"full","role":"admin"}};
-            let users = defaultUsers;
             try {
-                const { data, error } = await sb.from('users').select(selectUserAuthRows());
-                if (error) throw error;
-                let cloudUsers = {};
-                if (data && data.length > 0) {
-                    data.forEach(u => {
-                        cloudUsers[u.username] = normalizeUserInfo(u.username, {
-                            pwd: u.password,
-                            avatar: '',
-                            permission: u.permission || 'full',
-                            role: u.role || (u.username === 'admin' ? 'admin' : 'user')
-                        });
-                    });
+                let users = {};
+                if (isAdmin || options.includeAll) {
+                    const result = await accountApi('listUsers');
+                    users = userArrayToMap(result.users || []);
+                } else {
+                    const result = await accountApi('me');
+                    if (result.user) users[result.user.username] = normalizeUserInfo(result.user.username, result.user);
                 }
-                users = { ...defaultUsers, ...cloudUsers };
                 lastUserSyncError = null;
                 cacheUsersLocally(users);
+                if (users[currentUser]) currentUserInfo = users[currentUser];
+                return users;
             } catch(e) {
                 lastUserSyncError = e;
                 if (!allowLocalFallback) throw e;
-                users = loadCachedUsers(defaultUsers);
+                return loadCachedUsers({});
             }
-            users = normalizeUsers(users);
-            cacheUsersLocally(users);
-            return users;
         }
         async function loadUserData(options = {}) {
             return await forceRefreshUserData(options);
         }
         async function saveUsers(users) {
-            users = normalizeUsers(users);
-            let syncError = null;
-            for (let [username, info] of Object.entries(users)) {
-                const row = buildUserRow(username, info);
-                const { error } = await sb.from('users').upsert(row, { onConflict: 'username' });
-                if (error) {
-                    syncError = error;
-                    break;
-                }
-            }
-            if (syncError) {
-                lastUserSyncError = syncError;
-                throw syncError;
-            }
-            lastUserSyncError = null;
-            cacheUsersLocally(users);
+            throw new Error('账号资料必须通过 /api/account 安全接口保存，不能从前端直接写 users 表。');
         }
         async function hasPermission(required) {
             try {
                 const users = await forceRefreshUserData({ allowLocalFallback: false });
                 const userInfo = users[currentUser];
                 if (!userInfo) return false;
+                currentUserInfo = userInfo;
                 isAdmin = (currentUser === 'admin') || userInfo.role === 'admin';
                 updateAdminVisibility();
                 if (isAdmin) return true;
@@ -2859,6 +2927,7 @@ alert(`账号 ${newName} 注册成功！`);
             try {
                 const users = await forceRefreshUserData({ allowLocalFallback: false });
                 const userInfo = users[currentUser];
+                if (userInfo) currentUserInfo = userInfo;
                 isAdmin = !!(userInfo && ((currentUser === 'admin') || userInfo.role === 'admin'));
                 updateAdminVisibility();
                 if (!isAdmin) alert('无权限：只有管理员可以操作这里');
@@ -2902,13 +2971,8 @@ alert(`账号 ${newName} 注册成功！`);
         async function deleteUserAccount(username) {
             if (!(await requireAdmin())) return;
             if(username === 'admin') { alert('不能删除管理员账号'); return; }
-            let users = await loadUserData({ allowLocalFallback: false });
-            if (!users[username]) { alert('用户不存在'); return; }
-            delete users[username];
             try {
-                const { error } = await sb.from('users').delete().eq('username', username);
-                if (error) throw error;
-                cacheUsersLocally(users);
+                await accountApi('deleteUser', { username });
             } catch(e) { alert('删除账号失败：' + e.message); return; }
             logAction('admin_delete_user', { username: username });
             renderAdminData();
@@ -2917,46 +2981,43 @@ alert(`账号 ${newName} 注册成功！`);
         async function toggleUserRole(username) {
             if (!(await requireAdmin())) return;
             if (username === 'admin') { alert('不能修改超级管理员的角色'); return; }
-            let users = await loadUserData({ allowLocalFallback: false });
-            if (!users[username]) { alert('用户不存在'); return; }
-            users[username].role = users[username].role === 'admin' ? 'user' : 'admin';
             try {
-                await saveUsers(users);
-                logAction('admin_toggle_role', { username: username, new_role: users[username].role });
+                const result = await accountApi('toggleUserRole', { username });
+                logAction('admin_toggle_role', { username: username, new_role: result.user && result.user.role });
                 renderAdminData();
-                alert(`已将 ${username} 设为${users[username].role === 'admin' ? '管理员' : '普通用户'}`);
+                alert(`已将 ${username} 设为${result.user && result.user.role === 'admin' ? '管理员' : '普通用户'}`);
             } catch(e) { alert('保存角色失败：' + e.message); }
         }
         async function setUserPermission(username, permission) {
             if (!(await requireAdmin())) return;
             if (username === 'admin') { alert('不能修改超级管理员的权限'); return; }
-            let users = await loadUserData({ allowLocalFallback: false });
-            if (!users[username]) { alert('用户不存在'); return; }
             if (!['view', 'comment', 'full'].includes(permission)) { alert('权限值不正确'); return; }
-            users[username].permission = permission;
             try {
-                await saveUsers(users);
+                await accountApi('setUserPermission', { username, permission });
                 logAction('admin_set_permission', { username: username, permission: permission });
                 const permLabels = { 'full': '完全权限', 'comment': '仅评论', 'view': '仅浏览' };
                 alert(`已将 ${username} 的权限设为：${permLabels[permission]}`);
                 renderAdminData();
             } catch(e) { alert('保存权限失败：' + e.message); }
         }
-        async function resetUserPwd(username) {
+        async function setUserPassword() {
             if (!(await requireAdmin())) return;
-            let users = await loadUserData({ allowLocalFallback: false });
-            if(!users[username]) { alert('用户不存在'); return; }
-            users[username].pwd='love1314';
+            const username = document.getElementById('setPwdUsername').value.trim();
+            const newPassword = document.getElementById('setPwdNew').value;
+            const confirm = document.getElementById('setPwdConfirm').value;
+            if (!username) { alert('用户不存在'); return; }
+            if (newPassword !== confirm) { alert('两次新密码不一致'); return; }
+            if (newPassword.length < 4) { alert('密码至少4位'); return; }
             try {
-                await saveUsers(users);
-            } catch(e) { alert('重置密码失败：账号没有同步到云端。错误：' + e.message); return; }
-            logAction('admin_reset_pwd', { username: username });
-            renderAdminData();
-            alert(`${username} 密码已重置为 love1314`);
+                await accountApi('setUserPassword', { username, newPassword });
+                logAction('admin_reset_pwd', { username: username });
+                closeModalById('setUserPasswordModal');
+                alert(`${username} 的密码已更新`);
+            } catch(e) { alert('设置密码失败：' + e.message); }
         }
         async function autoLogin() {
             let savedUser = localStorage.getItem('couple_logged_user');
-            if (!savedUser) return false;
+            if (!savedUser || !getSessionToken()) return false;
             try {
                 let users = await loadUserData({ allowLocalFallback: false });
                 if (users[savedUser]) {
@@ -2988,16 +3049,13 @@ alert(`账号 ${newName} 注册成功！`);
             if(!u || !p) { alert('请输入账号和密码'); return; }
             if(btn) { btn.disabled = true; btn.innerText = '正在登录...'; }
             try {
-                let users = await loadUserData({ allowLocalFallback: false });
-                if(users[u] && users[u].pwd===p){ 
-                    localStorage.setItem('couple_logged_user', u);
-                    enterMainSystem(u, users);
-                } else { 
-                    logAction('login_failed', { username: u, reason: '账号或密码错误' });
-                    alert('账号或密码错误'); 
-                }
+                const result = await accountApi('login', { username: u, password: p });
+                setSession(result.user.username, result.sessionToken);
+                const users = {}; users[result.user.username] = normalizeUserInfo(result.user.username, result.user);
+                enterMainSystem(result.user.username, users);
             } catch(e) {
-                alert('登录失败：无法从 Supabase 读取账号。请确认 users 表权限、字段和网络连接。错误：' + e.message);
+                logAction('login_failed', { username: u, reason: e.message });
+                alert('登录失败：' + e.message);
             } finally {
                 if(btn) { btn.disabled = false; btn.innerText = '登录'; }
             }
@@ -3021,9 +3079,8 @@ alert(`账号 ${newName} 注册成功！`);
         function enterMainSystem(username, users) {
             currentUser = username;
             currentTab = 'message';
-            const deviceState = getLoginDeviceState(username);
-            const deviceId = deviceState.deviceId;
             const userInfo = users[username] || {};
+            currentUserInfo = userInfo;
             isAdmin = (username === 'admin') || userInfo.role === 'admin';
             document.getElementById('bubbleLayer').style.display = 'none';
             document.getElementById('loginPage').style.display = 'none';
@@ -3034,9 +3091,7 @@ alert(`账号 ${newName} 注册成功！`);
             updateTogetherDays();
             updateAdminVisibility();
             updateActivity();
-            const loginAction = deviceState.isNewDevice ? 'login_new_device' : 'login_known_device';
-            logAction(loginAction, { username: username, device_id: deviceId, device_scope: deviceState.scope, known_device_count: deviceState.knownDeviceCount });
-            rememberLoginDevice(username, deviceId);
+            logAction('login', { username: username });
             renderMessages({ force: true }).catch(e => console.log('留言板首屏加载失败:', e));
             startAutoSync();
             startHeartbeat();
@@ -3057,7 +3112,6 @@ alert(`账号 ${newName} 注册成功！`);
             document.getElementById('loginPage').style.display = 'none';
             document.getElementById('mainPage').style.display = 'none';
             
-            if(!localStorage.getItem('couple_users')) cacheUsersLocally({"boy":{"pwd":"love1314","avatar":""},"girl":{"pwd":"love1314","avatar":""},"admin":{"pwd":"admin123","avatar":""}});
             loadStorageModeSetting(); 
             let texts=['宝宝我爱你','我超喜欢你','我们要一直在一起','最爱宝宝啦'];
             for(let i=0;i<25;i++){ 
