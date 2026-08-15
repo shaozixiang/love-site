@@ -727,11 +727,22 @@
         function clearSession() { localStorage.removeItem('couple_logged_user'); localStorage.removeItem('couple_session_token'); }
         async function accountApi(action, payload = {}) {
             if (window.location.protocol === 'file:') throw new Error('账号安全接口 /api/account 只在部署到 Cloudflare Pages 或 Vercel 后可用，不能直接双击本地 HTML 登录。');
-            const response = await fetch('/api/account', {
+            const controller = new AbortController();
+            const timeout = setTimeout(() => controller.abort(), 12000);
+            let response;
+            try {
+                response = await fetch('/api/account', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ action, sessionToken: getSessionToken(), ...payload })
+                body: JSON.stringify({ action, sessionToken: getSessionToken(), ...payload }),
+                signal: controller.signal
             });
+            } catch(e) {
+                if (e && e.name === 'AbortError') throw new Error('/api/account 超时，请刷新页面或检查网络/后端函数。');
+                throw e;
+            } finally {
+                clearTimeout(timeout);
+            }
             const responseText = await response.text();
             let result = {};
             try { result = responseText ? JSON.parse(responseText) : {}; } catch(e) {
@@ -2976,24 +2987,18 @@
             if (isAdmin && currentUserInfo) {
                 document.getElementById('adminPanel').style.display = 'block';
                 document.getElementById('adminContent').innerHTML = '<div class="admin-section" style="color:#888;">后台正在加载...</div>'; 
-                renderAdminData();
-                forceRefreshUserData({ allowLocalFallback: false }).then(users => {
-                    const userInfo = users[currentUser];
-                    const stillAdmin = !!(userInfo && ((currentUser === 'admin') || userInfo.role === 'admin'));
-                    if (!stillAdmin) {
-                        isAdmin = false;
-                        updateAdminVisibility();
-                        closeAdminPanel();
-                        alert('无权限：只有管理员可以操作这里');
-                    }
-                }).catch(e => console.warn('后台权限后台复核失败:', e));
+                renderAdminData().catch(e => {
+                    document.getElementById('adminContent').innerHTML = `<div class="admin-section" style="color:#c00;line-height:1.7;">后台加载失败：${escapeHtml(e.message || String(e))}<br>请刷新页面后再试。</div>`;
+                });
                 return;
             }
             document.getElementById('adminPanel').style.display = 'block';
             document.getElementById('adminContent').innerHTML = '<div class="admin-section" style="color:#888;">正在确认管理员权限...</div>'; 
             if (!(await requireAdmin())) { closeAdminPanel(); return; }
             document.getElementById('adminPanel').style.display = 'block';
-            renderAdminData();
+            renderAdminData().catch(e => {
+                document.getElementById('adminContent').innerHTML = `<div class="admin-section" style="color:#c00;line-height:1.7;">后台加载失败：${escapeHtml(e.message || String(e))}<br>请刷新页面后再试。</div>`;
+            });
         }
         async function deleteUserAccount(username) {
             if (!(await requireAdmin())) return;
