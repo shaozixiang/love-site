@@ -230,7 +230,7 @@ const App = {
     card.innerHTML = `
       <div class="card-head">
         <div class="avatar">${avatarOf(m.author)}</div>
-        <div><div class="card-name">${esc(m.authorName || displayName(m.author))}</div><div class="card-time">${fmtTime(m.created_at)}</div></div>
+        <div><div class="card-name">${esc(m.author_name || displayName(m.author))}</div><div class="card-time">${fmtTime(m.created_at)}</div></div>
       </div>
       ${m.content ? `<div class="card-text">${esc(m.content)}</div>` : ''}
       ${media}
@@ -268,7 +268,7 @@ const App = {
     const likes = (f.likes || []).map(String);
     const liked = likes.includes(Auth.user?.username);
     const comments = (f.comments || []).slice(0, 3);
-    const medias = (f.media || []).filter(x => x && x.data);
+    const medias = (f.medias || f.media || []).filter(x => x && x.data);
     let grid = '';
     if (medias.length) {
       const cls = medias.length === 1 ? 'grid-1' : (medias.length === 2 ? 'grid-2' : 'grid-3');
@@ -280,9 +280,9 @@ const App = {
     card.innerHTML = `
       <div class="card-head">
         <div class="avatar">${avatarOf(f.author)}</div>
-        <div><div class="card-name">${esc(f.authorName || displayName(f.author))}</div><div class="card-time">${fmtTime(f.created_at)}</div></div>
+        <div><div class="card-name">${esc(f.author_name || displayName(f.author))}</div><div class="card-time">${fmtTime(f.created_at)}</div></div>
       </div>
-      ${f.desc ? `<div class="card-text">${esc(f.desc)}</div>` : ''}
+      ${f.description ? `<div class="card-text">${esc(f.description)}</div>` : ''}
       ${grid}
       <div class="card-actions">
         <button class="act-btn ${liked ? 'liked' : ''}" onclick="App.toggleLike('feeds','${f.id}',this)">${liked ? '❤️' : '🤍'} ${likes.length ? likes.length : '赞'}</button>
@@ -309,9 +309,9 @@ const App = {
     const mem = (this.cache.memories || []);
     const todo = (this.cache.schedules || []);
     const count = (this.cache.countdowns || []);
-    el.appendChild(sec('打卡回忆', '🌟', mem, r => `${r.content || r.title || ''}`));
-    el.appendChild(sec('行程计划', '🗺️', todo, r => `${r.title || r.place || ''}${r.date ? ' · ' + String(r.date).slice(0, 10) : ''}`));
-    el.appendChild(sec('纪念日', '⏳', count, r => `${r.title || ''}${r.date ? ' · ' + String(r.date).slice(0, 10) : ''}`));
+    el.appendChild(sec('打卡回忆', '🌟', mem, r => `${r.content || ''}`));
+    el.appendChild(sec('行程计划', '🗺️', todo, r => `${r.title || r.place || ''}${r.start_date ? ' · ' + String(r.start_date).slice(0, 10) : ''}${r.end_date && r.end_date !== r.start_date ? ' → ' + String(r.end_date).slice(0, 10) : ''}`));
+    el.appendChild(sec('纪念日', '⏳', count, r => `${r.name || r.title || ''}${r.target_date ? ' · ' + String(r.target_date).slice(0, 10) : ''}`));
   },
   renderLove(el) {
     const rows = (this.cache.loves || []).slice(0, 40);
@@ -321,7 +321,7 @@ const App = {
     for (const r of rows) {
       const d = document.createElement('div'); d.className = 'card';
       d.innerHTML = `<div class="card-text" style="font-size:15.5px">${esc(r.content || '')}</div>
-        <div style="margin-top:8px;font-size:11.5px;color:var(--text-soft)">${esc(r.authorName || displayName(r.author))} · ${fmtTime(r.created_at)}</div>`;
+        <div style="margin-top:8px;font-size:11.5px;color:var(--text-soft)">${esc(r.author_name || displayName(r.author))} · ${fmtTime(r.created_at)}</div>`;
       wrap.appendChild(d);
     }
     const add = document.createElement('button'); add.className = 'card compose-bar';
@@ -432,9 +432,9 @@ const App = {
       const row = {
         id: uid(), author: Auth.user.username, authorName: displayName(Auth.user.username), created_at: nowIso(),
       };
-      if (t === 'messages') { row.content = text; if (file) row.photo = await uploadMedia(file); }
-      else if (t === 'feeds') { row.desc = text; if (file) { const url = await uploadMedia(file); row.media = [{ type: 'image', data: url }]; } }
-      else if (t === 'loves') { row.content = text; row.author = Auth.user.username; }
+      if (t === 'messages') { row.author_name = displayName(Auth.user.username); row.content = text; if (file) row.photo = await uploadMedia(file); }
+      else if (t === 'feeds') { row.author_name = displayName(Auth.user.username); row.description = text; if (file) { const url = await uploadMedia(file); row.medias = [{ type: 'image', data: url }]; } }
+      else if (t === 'loves') { row.author = Auth.user.username; row.author_name = displayName(Auth.user.username); row.content = text; }
       await supabase.insert(t, row);
       await Sync.pullTable(t, null);
       $('#composeLayer').hidden = true;
@@ -556,7 +556,8 @@ const Ai = {
           const t = m[1] === '留言' ? 'messages' : 'feeds';
           const row = { id: uid(), author: Auth.user.username, authorName: displayName(Auth.user.username), created_at: nowIso() };
           if (t === 'messages') row.content = m[2].trim();
-          else row.desc = m[2].trim();
+          else row.description = m[2].trim();
+          row.author_name = displayName(Auth.user.username);
           await supabase.insert(t, row);
           await Sync.pullTable(t, null);
           App.renderCurrent();
