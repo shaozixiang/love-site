@@ -69,21 +69,18 @@ const DB = (() => {
 /* ---------- Supabase REST（anon 公钥） ---------- */
 const supabase = {
   _headers() { return { 'apikey': CONFIG.SUPABASE_ANON, 'Authorization': 'Bearer ' + CONFIG.SUPABASE_ANON, 'Content-Type': 'application/json' }; },
-  select: async (table, { filter = '', order = 'created_at.desc', limit = 1000 } = {}) => {
+  select(table, { filter = '', order = 'created_at.desc', limit = 1000 } = {}) {
     let url = `${CONFIG.SUPABASE_URL}/rest/v1/${table}?select=*&order=${order}&limit=${limit}`;
     if (filter) url += '&' + filter;
-    const r = await fetch(url, { headers: this._headers() });
-    if (!r.ok) throw new Error(`${table} 查询失败 ${r.status}`);
-    return r.json();
+    return fetch(url, { headers: this._headers() }).then(r => { if (!r.ok) throw new Error(`${table} 查询失败 ${r.status}`); return r.json(); });
   },
-  insert: async (table, row) => {
-    const r = await fetch(`${CONFIG.SUPABASE_URL}/rest/v1/${table}`, { method: 'POST', headers: this._headers(), body: JSON.stringify(row) });
-    if (!r.ok) throw new Error(`${table} 写入失败 ${r.status}: ${(await r.text()).slice(0, 120)}`);
-    return r.json();
+  insert(table, row) {
+    return fetch(`${CONFIG.SUPABASE_URL}/rest/v1/${table}`, { method: 'POST', headers: this._headers(), body: JSON.stringify(row) })
+      .then(r => { if (!r.ok) return r.text().then(t => { throw new Error(`${table} 写入失败 ${r.status}: ${t.slice(0, 120)}`); }); return r.json(); });
   },
-  update: async (table, id, patch) => {
-    const r = await fetch(`${CONFIG.SUPABASE_URL}/rest/v1/${table}?id=eq.${encodeURIComponent(id)}`, { method: 'PATCH', headers: this._headers(), body: JSON.stringify(patch) });
-    if (!r.ok) throw new Error(`${table} 更新失败 ${r.status}`);
+  update(table, id, patch) {
+    return fetch(`${CONFIG.SUPABASE_URL}/rest/v1/${table}?id=eq.${encodeURIComponent(id)}`, { method: 'PATCH', headers: this._headers(), body: JSON.stringify(patch) })
+      .then(r => { if (!r.ok) throw new Error(`${table} 更新失败 ${r.status}`); });
   },
 };
 
