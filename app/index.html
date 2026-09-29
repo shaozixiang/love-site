@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="theme-color" content="#fff5f6">
+<title>我们的小站</title>
+<link rel="manifest" href="manifest.json">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<!-- ===== 登录页 ===== -->
+<div id="loginPage" class="page">
+  <div class="login-card">
+    <div class="login-heart">💗</div>
+    <h1>我们的小站</h1>
+    <p class="login-sub">只属于我们的悄悄话</p>
+    <div class="login-field">
+      <span class="field-icon">👤</span>
+      <input id="loginUser" type="text" placeholder="账号" autocomplete="username">
+    </div>
+    <div class="login-field">
+      <span class="field-icon">🔒</span>
+      <input id="loginPass" type="password" placeholder="密码" autocomplete="current-password">
+    </div>
+    <button id="loginBtn" class="primary-btn">进入小站</button>
+    <p class="login-error" id="loginError"></p>
+  </div>
+  <p class="login-foot">第一次进入会自动下载全部内容，之后离线也能看</p>
+</div>
+
+<!-- ===== 主界面 ===== -->
+<div id="mainPage" class="page" hidden>
+  <header id="topBar" class="top-bar">
+    <div class="top-title" id="topTitle">留言板</div>
+    <div class="top-actions">
+      <button id="syncBtn" class="icon-btn" title="立即刷新">⟳</button>
+    </div>
+  </header>
+
+  <main id="content" class="content"></main>
+
+  <nav class="tab-bar" id="tabBar">
+    <button class="tab-btn active" data-tab="messages"><span class="tab-icon">💬</span><span>留言</span></button>
+    <button class="tab-btn" data-tab="gallery"><span class="tab-icon">📸</span><span>相册</span></button>
+    <button class="tab-btn" data-tab="memories"><span class="tab-icon">🌟</span><span>回忆</span></button>
+    <button class="tab-btn" data-tab="love"><span class="tab-icon">💗</span><span>爱你</span></button>
+    <button class="tab-btn" data-tab="more"><span class="tab-icon">⋯</span><span>更多</span></button>
+  </nav>
+</div>
+
+<!-- ===== 发留言弹层 ===== -->
+<div id="composeLayer" class="layer" hidden>
+  <div class="layer-mask" data-close="composeLayer"></div>
+  <div class="layer-sheet">
+    <div class="sheet-head"><b id="composeTitle">发留言</b><button class="sheet-close" data-close="composeLayer">✕</button></div>
+    <textarea id="composeText" class="sheet-text" rows="3" placeholder="想说的话…"></textarea>
+    <div class="sheet-media">
+      <label class="pick-media">🖼️ 选图<input type="file" id="composeFile" accept="image/*" hidden></label>
+      <img id="composePreview" class="sheet-preview" hidden>
+    </div>
+    <button id="composeSend" class="primary-btn">发送</button>
+  </div>
+</div>
+
+<!-- ===== AI 悬浮窗 ===== -->
+<div id="aiFab" class="ai-fab" title="AI 助手">🤖</div>
+<div id="aiPanel" class="ai-panel" hidden>
+  <div class="ai-head">
+    <b>🤖 小站 AI</b>
+    <button id="aiClose" class="sheet-close">✕</button>
+  </div>
+  <div id="aiMsgs" class="ai-msgs"></div>
+  <div class="ai-input-row">
+    <input id="aiInput" type="text" placeholder="问我问题，或让我发留言…">
+    <button id="aiSend" class="primary-btn ai-send">发送</button>
+  </div>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>

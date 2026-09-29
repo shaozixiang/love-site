@@ -1,0 +1,25 @@
+{
+  "name": "我们的小站",
+  "short_name": "小站",
+  "description": "只属于我们的悄悄话与回忆",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#fff5f6",
+  "theme_color": "#fff5f6",
+  "icons": [
+    {
+      "src": "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ccircle cx='50' cy='50' r='48' fill='%23ff6b81'/%3E%3Ctext x='50' y='66' font-size='48' text-anchor='middle'%3E%F0%9F%92%97%3C/text%3E%3C/svg%3E",
+      "sizes": "192x192",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ccircle cx='50' cy='50' r='48' fill='%23ff6b81'/%3E%3Ctext x='50' y='66' font-size='48' text-anchor='middle'%3E%F0%9F%92%97%3C/text%3E%3C/svg%3E",
+      "sizes": "512x512",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}
