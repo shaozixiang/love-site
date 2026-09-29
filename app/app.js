@@ -68,21 +68,21 @@ const DB = (() => {
 
 /* ---------- Supabase REST（anon 公钥） ---------- */
 const supabase = {
-  headers: { 'apikey': CONFIG.SUPABASE_ANON, 'Authorization': 'Bearer ' + CONFIG.SUPABASE_ANON, 'Content-Type': 'application/json' },
+  _headers() { return { 'apikey': CONFIG.SUPABASE_ANON, 'Authorization': 'Bearer ' + CONFIG.SUPABASE_ANON, 'Content-Type': 'application/json' }; },
   select: async (table, { filter = '', order = 'created_at.desc', limit = 1000 } = {}) => {
     let url = `${CONFIG.SUPABASE_URL}/rest/v1/${table}?select=*&order=${order}&limit=${limit}`;
     if (filter) url += '&' + filter;
-    const r = await fetch(url, { headers: this.headers });
+    const r = await fetch(url, { headers: this._headers() });
     if (!r.ok) throw new Error(`${table} 查询失败 ${r.status}`);
     return r.json();
   },
   insert: async (table, row) => {
-    const r = await fetch(`${CONFIG.SUPABASE_URL}/rest/v1/${table}`, { method: 'POST', headers: this.headers, body: JSON.stringify(row) });
+    const r = await fetch(`${CONFIG.SUPABASE_URL}/rest/v1/${table}`, { method: 'POST', headers: this._headers(), body: JSON.stringify(row) });
     if (!r.ok) throw new Error(`${table} 写入失败 ${r.status}: ${(await r.text()).slice(0, 120)}`);
     return r.json();
   },
   update: async (table, id, patch) => {
-    const r = await fetch(`${CONFIG.SUPABASE_URL}/rest/v1/${table}?id=eq.${encodeURIComponent(id)}`, { method: 'PATCH', headers: this.headers, body: JSON.stringify(patch) });
+    const r = await fetch(`${CONFIG.SUPABASE_URL}/rest/v1/${table}?id=eq.${encodeURIComponent(id)}`, { method: 'PATCH', headers: this._headers(), body: JSON.stringify(patch) });
     if (!r.ok) throw new Error(`${table} 更新失败 ${r.status}`);
   },
 };
