@@ -1345,26 +1345,19 @@ body {
         }
         loadAngryData();
     }
-    // 修复：apologies 表真实结构探测（无 author/author_name 列时降级，避免 400 报错）
-    // 提示：在 Supabase SQL Editor 执行 ALTER TABLE 加列后可升级为云端完整记录
-    var apologyAuthorCols = null;
-    async function detectApologyCols() {
-        if (apologyAuthorCols !== null) return apologyAuthorCols;
-        try { const { data, error } = await sb.from('apologies').select('author').limit(1); apologyAuthorCols = !error; } catch (e) { apologyAuthorCols = false; }
-        return apologyAuthorCols;
-    }
+    // 修复：apologies 表以真实列（id,content,created_at,status）操作，零报错；
+    // 升级提示：在 Supabase SQL Editor 执行下面 SQL 加列后，可启用云端记录作者信息（告诉我即可切换）
+    //   ALTER TABLE public.apologies ADD COLUMN IF NOT EXISTS author text;
+    //   ALTER TABLE public.apologies ADD COLUMN IF NOT EXISTS author_name text;
     async function loadAngryData() {
         let mode = { enabled: false, by: '' };
         let ap = [];
         try {
             const { data: modeData } = await sb.from('angry_mode').select('id,enabled,by').limit(1).maybeSingle();
             if (modeData) mode = modeData;
-            // 修复：只查真实存在的列，不再因 author 列不存在整段 400 走 localStorage
-            const hasCols = await detectApologyCols();
-            const sel = hasCols ? 'id,content,author,author_name,created_at,status' : 'id,content,created_at,status';
-            const { data: apData } = await sb.from('apologies').select(sel).order('created_at', { ascending: false }).limit(PAGE_LIMIT);
-            const cloudItems = (apData || []).map(a => ({ id: a.id, content: a.content, from: a.author || '', fromName: a.author_name || '', ts: new Date(a.created_at).getTime(), time: new Date(a.created_at).toLocaleString(), status: a.status || 'pending' }));
-            // 合并本地兜底记录（换设备前/离线提交的道歉不丢）
+            const { data: apData } = await sb.from('apologies').select('id,content,created_at,status').order('created_at', { ascending: false }).limit(PAGE_LIMIT);
+            const cloudItems = (apData || []).map(a => ({ id: a.id, content: a.content, from: '', fromName: '', ts: new Date(a.created_at).getTime(), time: new Date(a.created_at).toLocaleString(), status: a.status || 'pending' }));
+            // 合并本地兜底记录（换设备前/离线提交的道歉不丢，含发送人信息）
             const localItems = (JSON.parse(localStorage.getItem('couple_apologies') || '[]')).map(a => ({ ...a, ts: a.ts || Date.now() }));
             const seen = new Set(); ap = [];
             for (const item of [...cloudItems, ...localItems]) { const k = String(item.id); if (seen.has(k)) continue; seen.add(k); ap.push(item); }
@@ -1386,10 +1379,7 @@ body {
         const localRec = { id: 'local-' + Date.now(), content, from: currentUser, fromName: authorDisplay(currentUser), ts: Date.now(), time: new Date().toLocaleString(), status: 'pending' };
         const ap = JSON.parse(localStorage.getItem('couple_apologies') || '[]'); ap.unshift(localRec); localStorage.setItem('couple_apologies', JSON.stringify(ap));
         try {
-            const hasCols = await detectApologyCols();
-            const payload = { content, status: 'pending', created_at: new Date().toISOString() };
-            if (hasCols) { payload.author = currentUser; payload.author_name = authorDisplay(currentUser); }
-            await sb.from('apologies').insert(payload);
+            await sb.from('apologies').insert({ content, status: 'pending', created_at: new Date().toISOString() });
             logAction('apology_submit', { content: content.substring(0, 50) });
         } catch (e) { console.warn('道歉云端写入失败（已保存在本机）:', e); }
         alert('道歉已提交，等待TA原谅~');
