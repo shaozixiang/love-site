@@ -799,8 +799,10 @@ body {
             const fullDetails = { ...envInfo, ...(typeof details === 'string' ? { message: details } : details) };
             const logData = { action, user: currentUser || 'guest', details: JSON.stringify(fullDetails), created_at: new Date().toISOString() };
             try { let localLogs = JSON.parse(localStorage.getItem('admin_logs') || '[]'); localLogs.unshift(logData); if (localLogs.length > LOG_LOCAL_LIMIT) localLogs = localLogs.slice(0, LOG_LOCAL_LIMIT); localStorage.setItem('admin_logs', JSON.stringify(localLogs)); } catch (e) { console.error('保存本地日志失败:', e); }
-            // 重要动作尝试写云端（表 RLS 若拒绝则静默失败，不影响本机日志）
-            if (LOG_REMOTE_ACTIONS.has(action)) { try { await sb.from('admin_logs').insert(logData); } catch (e) {} }
+            // 重要动作尝试写云端（表 RLS 若拒绝则静默失败一次，本会话不再重试，避免反复 401 噪音）
+            if (LOG_REMOTE_ACTIONS.has(action) && sessionStorage.getItem('couple_remote_log_failed') !== '1') {
+                try { await sb.from('admin_logs').insert(logData); } catch (e) { sessionStorage.setItem('couple_remote_log_failed', '1'); }
+            }
         } catch (e) { console.error('记录日志失败:', e); }
     }
     function readLocalAdminLogs() { try { const l = JSON.parse(localStorage.getItem('admin_logs') || '[]'); return Array.isArray(l) ? l : []; } catch (e) { return []; } }
