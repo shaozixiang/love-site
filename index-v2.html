@@ -1958,8 +1958,8 @@ body {
             const users = await loadUserData({ allowLocalFallback: false });
             if (users[savedUser]) { enterMainSystem(savedUser, users); return true; }
         } catch (e) {
-            localStorage.removeItem('couple_logged_user');
-            console.warn('自动登录失败，需要重新登录:', e);
+            // 修复：自动登录失败时保留登录态（网络抖动不清除），仅回到登录页让用户手动重登
+            console.warn('自动登录失败，请手动登录:', e);
             document.getElementById('mainPage').style.display = 'none';
             document.getElementById('loginPage').style.display = 'flex';
             updateAdminVisibility();
