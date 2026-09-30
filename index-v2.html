@@ -546,11 +546,17 @@ body {
     const AUTO_SYNC_INTERVAL_MS = 5 * 60 * 1000;
     const ONLINE_STATUS_INTERVAL_MS = 5 * 60 * 1000;
     const LOG_LOCAL_LIMIT = 300;
+    // 重要动作尝试写云端日志（admin_logs 表 RLS 默认拒绝匿名写，失败静默、低频无噪音）；
+    // 普通动作只存本机 localStorage，完整历史以本机为准。
     const LOG_REMOTE_ACTIONS = new Set([
         'admin_delete', 'admin_reset_pwd', 'admin_delete_user', 'admin_create_user',
         'admin_toggle_role', 'admin_set_permission', 'admin_toggle_visibility',
         'publish_feed', 'publish_message', 'publish_love', 'publish_memory',
-        'publish_memo', 'publish_schedule', 'publish_countdown', 'publish_marker'
+        'publish_memo', 'publish_schedule', 'publish_countdown', 'publish_marker',
+        'login', 'logout', 'login_failed', 'angry_on', 'angry_off', 'apology_submit',
+        'apology_pass', 'apology_reject', 'update_avatar', 'change_password',
+        'comment_feed', 'comment_message', 'like_feed', 'like_message',
+        'unlike_feed', 'unlike_message', 'delete_comment_feed', 'delete_comment_message'
     ]);
     // 修复：状态变量用 var 并前置，避免任何时序下出现 TDZ；supabase 初始化失败不中断脚本（UI 仍可用）
     var bubbleClicked = 0, bubbleReplenishTimer = null, currentUser = '', isAdmin = false, storageMode = 'cloud',
@@ -793,8 +799,8 @@ body {
             const fullDetails = { ...envInfo, ...(typeof details === 'string' ? { message: details } : details) };
             const logData = { action, user: currentUser || 'guest', details: JSON.stringify(fullDetails), created_at: new Date().toISOString() };
             try { let localLogs = JSON.parse(localStorage.getItem('admin_logs') || '[]'); localLogs.unshift(logData); if (localLogs.length > LOG_LOCAL_LIMIT) localLogs = localLogs.slice(0, LOG_LOCAL_LIMIT); localStorage.setItem('admin_logs', JSON.stringify(localLogs)); } catch (e) { console.error('保存本地日志失败:', e); }
-            // 修复：全部动作都尝试写云端（表允许就写，失败静默），换设备也能看到完整历史
-            try { await sb.from('admin_logs').insert(logData); } catch (e) {}
+            // 重要动作尝试写云端（表 RLS 若拒绝则静默失败，不影响本机日志）
+            if (LOG_REMOTE_ACTIONS.has(action)) { try { await sb.from('admin_logs').insert(logData); } catch (e) {} }
         } catch (e) { console.error('记录日志失败:', e); }
     }
     function readLocalAdminLogs() { try { const l = JSON.parse(localStorage.getItem('admin_logs') || '[]'); return Array.isArray(l) ? l : []; } catch (e) { return []; } }
