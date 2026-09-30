@@ -642,13 +642,14 @@ body {
     function sectionCacheKey(table) { return 'couple_cache_' + (currentUser || 'guest') + '_' + table; }
     async function getCachedRows(table, columns, options = {}) {
         const cacheKey = sectionCacheKey(table);
-        const cached = readLocalJSON(cacheKey) || { data: [], syncedAt: null };
+        const cached = readLocalJSON(cacheKey) || { data: [], syncedAt: null, complete: false };
         if (options.force) {
             const { data } = await selectContentRows(table, columns, { limit: options.limit || PAGE_LIMIT });
-            writeLocalJSON(cacheKey, { data: data || [], syncedAt: new Date().toISOString() });
+            writeLocalJSON(cacheKey, { data: data || [], syncedAt: new Date().toISOString(), complete: true });
             return data || [];
         }
-        if (cached.data && cached.data.length) {
+        // 修复：只有“完整快照”缓存才走增量（防止缓存不完整/损坏时永远拉不回旧数据）；否则全量重建
+        if (cached.data && cached.data.length && cached.complete) {
             // 秒开缓存（0 流量），后台增量拉取新增记录
             try {
                 let incQuery = sb.from(table).select(columns);
@@ -656,12 +657,12 @@ body {
                 const inc = await incQuery.gt('created_at', cached.syncedAt).order('created_at', { ascending: false }).limit(options.limit || PAGE_LIMIT);
                 if (inc.error) throw inc.error;
                 const merged = mergeRowsById(cached.data, inc.data || []);
-                writeLocalJSON(cacheKey, { data: merged, syncedAt: new Date().toISOString() });
+                writeLocalJSON(cacheKey, { data: merged, syncedAt: new Date().toISOString(), complete: true });
                 return merged;
             } catch (e) { return cached.data; } // 网络失败/增量失败 → 离线用缓存
         }
         const { data } = await selectContentRows(table, columns, { limit: options.limit || PAGE_LIMIT });
-        writeLocalJSON(cacheKey, { data: data || [], syncedAt: new Date().toISOString() });
+        writeLocalJSON(cacheKey, { data: data || [], syncedAt: new Date().toISOString(), complete: true });
         return data || [];
     }
 
