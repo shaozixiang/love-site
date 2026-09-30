@@ -415,7 +415,7 @@ body {
             <p style="margin:10px 0; color:#666; font-size:14px;">快去写封道歉信哄哄TA吧~</p>
             <textarea class="angry-textarea" id="apologyInput" placeholder="写道歉信..."></textarea>
             <button class="submit-btn" onclick="submitApology()" style="width:100%;">提交道歉</button>
-            <button class="submit-btn ghost" style="margin-top:10px; width:100%;" onclick="closeAngryMask()">暂不道歉，先逛逛</button>
+            <button class="submit-btn ghost" style="margin-top:10px; width:100%;" onclick="closeAngryMask(true)">暂不道歉，先逛逛</button>
         </div>
     </div>
 
@@ -621,6 +621,43 @@ body {
         return query.limit(options.limit || PAGE_LIMIT);
     }
 
+    // ---------- 离线缓存 + 增量同步（省流量核心） ----------
+    // 设计：首次登录全量拉一次存本地；之后“秒开本地缓存 + 后台只拉新增记录”；
+    // 图片 URL 不变走浏览器 HTTP 缓存，不重复下载；每 15 分钟全量对比兜底同步删除。
+    function readLocalJSON(key) { try { const v = localStorage.getItem(key); return v ? JSON.parse(v) : null; } catch (e) { return null; } }
+    function writeLocalJSON(key, val) { try { localStorage.setItem(key, JSON.stringify(val)); return true; } catch (e) { return false; } }
+    function mergeRowsById(cached = [], incoming = []) {
+        const map = new Map();
+        for (const r of incoming) if (r && r.id) map.set(r.id, r);
+        for (const r of cached) if (r && r.id && !map.has(r.id)) map.set(r.id, r);
+        return Array.from(map.values()).sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0)).slice(0, PAGE_LIMIT);
+    }
+    function sectionCacheKey(table) { return 'couple_cache_' + (currentUser || 'guest') + '_' + table; }
+    async function getCachedRows(table, columns, options = {}) {
+        const cacheKey = sectionCacheKey(table);
+        const cached = readLocalJSON(cacheKey) || { data: [], syncedAt: null };
+        if (options.force) {
+            const { data } = await selectContentRows(table, columns, { limit: options.limit || PAGE_LIMIT });
+            writeLocalJSON(cacheKey, { data: data || [], syncedAt: new Date().toISOString() });
+            return data || [];
+        }
+        if (cached.data && cached.data.length) {
+            // 秒开缓存（0 流量），后台增量拉取新增记录
+            try {
+                const incQuery = sb.from(table).select(columns);
+                if (!isAdmin && !isCoupleAccount()) incQuery = incQuery.or('visibility.is.null,visibility.eq.public');
+                const inc = await incQuery.gt('created_at', cached.syncedAt).order('created_at', { ascending: false }).limit(options.limit || PAGE_LIMIT);
+                if (inc.error) throw inc.error;
+                const merged = mergeRowsById(cached.data, inc.data || []);
+                writeLocalJSON(cacheKey, { data: merged, syncedAt: new Date().toISOString() });
+                return merged;
+            } catch (e) { return cached.data; } // 网络失败/增量失败 → 离线用缓存
+        }
+        const { data } = await selectContentRows(table, columns, { limit: options.limit || PAGE_LIMIT });
+        writeLocalJSON(cacheKey, { data: data || [], syncedAt: new Date().toISOString() });
+        return data || [];
+    }
+
     // ---------- 上传 ----------
     async function compressImage(file, maxSizeMB = 2, maxWidth = 1280) {
         return new Promise((resolve) => {
@@ -755,7 +792,8 @@ body {
             const fullDetails = { ...envInfo, ...(typeof details === 'string' ? { message: details } : details) };
             const logData = { action, user: currentUser || 'guest', details: JSON.stringify(fullDetails), created_at: new Date().toISOString() };
             try { let localLogs = JSON.parse(localStorage.getItem('admin_logs') || '[]'); localLogs.unshift(logData); if (localLogs.length > LOG_LOCAL_LIMIT) localLogs = localLogs.slice(0, LOG_LOCAL_LIMIT); localStorage.setItem('admin_logs', JSON.stringify(localLogs)); } catch (e) { console.error('保存本地日志失败:', e); }
-            if (LOG_REMOTE_ACTIONS.has(action)) { try { await sb.from('admin_logs').insert(logData); } catch (e) {} }
+            // 修复：全部动作都尝试写云端（表允许就写，失败静默），换设备也能看到完整历史
+            try { await sb.from('admin_logs').insert(logData); } catch (e) {}
         } catch (e) { console.error('记录日志失败:', e); }
     }
     function readLocalAdminLogs() { try { const l = JSON.parse(localStorage.getItem('admin_logs') || '[]'); return Array.isArray(l) ? l : []; } catch (e) { return []; } }
@@ -817,16 +855,15 @@ body {
         updateFilePreview();
         if (descEl) descEl.value = '';
         if (btn) { btn.disabled = false; btn.innerText = '📤 发送动态'; }
-        renderFeeds({ force: true });
+        renderFeeds({ force: false });
         addDanmaku(`${authorDisplay(currentUser)} 发布了新动态！`);
     }
     async function renderFeeds(options = {}) {
         if (!shouldReloadSection('gallery', options && options.force)) return;
         let feeds = [];
         try {
-            const { data, error } = await selectContentRows('feeds', 'id,description,author,author_name,created_at,comments,likes,visibility,medias', { limit: PAGE_LIMIT });
-            if (error) throw error;
-            feeds = (data || []).map(f => ({
+            const rows = await getCachedRows('feeds', 'id,description,author,author_name,created_at,comments,likes,visibility,medias', { limit: PAGE_LIMIT, force: options.force });
+            feeds = (rows || []).map(f => ({
                 id: f.id, medias: f.medias || [], desc: f.description || '', author: f.author,
                 authorName: f.author_name, time: new Date(f.created_at).toLocaleString(),
                 comments: f.comments || [], likes: f.likes || [], visibility: normalizeVisibility(f.visibility)
@@ -958,16 +995,15 @@ body {
         fileInput.value = '';
         document.getElementById('messagePhotoPreview').innerHTML = '';
         if (btn) { btn.disabled = false; btn.innerText = '发送留言'; }
-        renderMessages({ force: true });
+        renderMessages({ force: false });
         addDanmaku(`${authorDisplay(currentUser)} 在留言板说了悄悄话`);
     }
     async function renderMessages(options = {}) {
         if (!shouldReloadSection('message', options && options.force)) return;
         let msgs = [];
         try {
-            const { data, error } = await selectContentRows('messages', 'id,content,photo,author,author_name,created_at,comments,likes,visibility', { limit: PAGE_LIMIT });
-            if (error) throw error;
-            msgs = (data || []).map(m => ({
+            const rows = await getCachedRows('messages', 'id,content,photo,author,author_name,created_at,comments,likes,visibility', { limit: PAGE_LIMIT, force: options.force });
+            msgs = (rows || []).map(m => ({
                 id: m.id, content: m.content || '', photo: m.photo, author: m.author,
                 author_name: m.author_name, time: new Date(m.created_at).toLocaleString(),
                 comments: m.comments || [], likes: m.likes || [], visibility: normalizeVisibility(m.visibility)
@@ -1077,16 +1113,15 @@ body {
         const newLove = { author: currentUser, author_name: authorDisplay(currentUser), content: val, privacy, visibility: 'public' };
         try { await sb.from('loves').insert(newLove); logAction('publish_love', { content: val.substring(0, 50), privacy }); } catch (e) { console.error(e); }
         document.getElementById('loveInput').value = '';
-        renderLoves({ force: true });
+        renderLoves({ force: false });
         addDanmaku(`${authorDisplay(currentUser)} 记录了感动的话`);
     }
     async function renderLoves(options = {}) {
         if (!shouldReloadSection('love', options && options.force)) return;
         let loves = [];
         try {
-            const { data, error } = await selectContentRows('loves', 'id,content,author,author_name,created_at,privacy,visibility', { limit: PAGE_LIMIT });
-            if (error) throw error;
-            loves = (data || []).map(l => ({ id: l.id, content: l.content, author: l.author, authorName: l.author_name, time: new Date(l.created_at).toLocaleString(), privacy: l.privacy, visibility: normalizeVisibility(l.visibility) }));
+            const rows = await getCachedRows('loves', 'id,content,author,author_name,created_at,privacy,visibility', { limit: PAGE_LIMIT, force: options.force });
+            loves = (rows || []).map(l => ({ id: l.id, content: l.content, author: l.author, authorName: l.author_name, time: new Date(l.created_at).toLocaleString(), privacy: l.privacy, visibility: normalizeVisibility(l.visibility) }));
             loves = loves.filter(canViewRecord);
             markSectionLoaded('love');
         } catch (e) { markSectionFailed('love'); document.getElementById('loveList').innerHTML = '<div class="empty-tip" style="color:#c00;">😵 加载失败，<a href="javascript:renderLoves({force:true})">点击重试</a></div>'; return; }
@@ -1107,16 +1142,15 @@ body {
         const newMemory = { author: currentUser, author_name: authorDisplay(currentUser), content: val, visibility: 'public' };
         try { await sb.from('memories').insert(newMemory); logAction('publish_memory', { content: val.substring(0, 50) }); } catch (e) { console.error(e); }
         document.getElementById('memoryInput').value = '';
-        renderMemories({ force: true });
+        renderMemories({ force: false });
         addDanmaku(`${authorDisplay(currentUser)} 完成了新打卡`);
     }
     async function renderMemories(options = {}) {
         if (!shouldReloadSection('memory', options && options.force)) return;
         let mem = [];
         try {
-            const { data, error } = await selectContentRows('memories', 'id,content,author,author_name,created_at,visibility', { limit: PAGE_LIMIT });
-            if (error) throw error;
-            mem = (data || []).map(m => ({ id: m.id, content: m.content, author: m.author, authorName: m.author_name, time: new Date(m.created_at).toLocaleString(), visibility: normalizeVisibility(m.visibility) }));
+            const rows = await getCachedRows('memories', 'id,content,author,author_name,created_at,visibility', { limit: PAGE_LIMIT, force: options.force });
+            mem = (rows || []).map(m => ({ id: m.id, content: m.content, author: m.author, authorName: m.author_name, time: new Date(m.created_at).toLocaleString(), visibility: normalizeVisibility(m.visibility) }));
             mem = mem.filter(canViewRecord);
             markSectionLoaded('memory');
         } catch (e) { markSectionFailed('memory'); document.getElementById('memoryList').innerHTML = '<div class="empty-tip" style="color:#c00;">😵 加载失败，<a href="javascript:renderMemories({force:true})">点击重试</a></div>'; return; }
@@ -1134,16 +1168,15 @@ body {
         const newMemo = { author: currentUser, author_name: authorDisplay(currentUser), content, priority, done: false, visibility: 'public' };
         try { await sb.from('memos').insert(newMemo); logAction('publish_memo', { content: content.substring(0, 50), priority }); } catch (e) { console.error(e); }
         document.getElementById('memoInput').value = '';
-        renderMemos({ force: true });
+        renderMemos({ force: false });
         addDanmaku(`${authorDisplay(currentUser)} 添加了待办事项`);
     }
     async function renderMemos(options = {}) {
         if (!shouldReloadSection('memo', options && options.force)) return;
         let memos = [];
         try {
-            const { data, error } = await selectContentRows('memos', 'id,content,priority,done,author,author_name,created_at,visibility', { limit: PAGE_LIMIT });
-            if (error) throw error;
-            memos = (data || []).map(m => ({ id: m.id, content: m.content, priority: m.priority || 'normal', done: m.done || false, author: m.author, authorName: m.author_name, time: new Date(m.created_at).toLocaleString(), visibility: normalizeVisibility(m.visibility) }));
+            const rows = await getCachedRows('memos', 'id,content,priority,done,author,author_name,created_at,visibility', { limit: PAGE_LIMIT, force: options.force });
+            memos = (rows || []).map(m => ({ id: m.id, content: m.content, priority: m.priority || 'normal', done: m.done || false, author: m.author, authorName: m.author_name, time: new Date(m.created_at).toLocaleString(), visibility: normalizeVisibility(m.visibility) }));
             memos = memos.filter(canViewRecord);
             markSectionLoaded('memo');
         } catch (e) { markSectionFailed('memo'); document.getElementById('memoList').innerHTML = '<div class="empty-tip" style="color:#c00;">😵 加载失败，<a href="javascript:renderMemos({force:true})">点击重试</a></div>'; return; }
@@ -1156,7 +1189,14 @@ body {
         }).join('');
         document.getElementById('memoList').innerHTML = html || '<div class="empty-tip">暂无待办事项，添加你们的计划吧~</div>';
     }
-    async function toggleMemoDone(id, done) { if (!(await canDeleteRecord('memos', id))) return; try { await sb.from('memos').update({ done }).eq('id', id); } catch (e) { console.error(e); } renderMemos({ force: true }); }
+    async function toggleMemoDone(id, done) {
+        // 修复：勾选自己的待办只需“评论/点赞”权限即可（原要求 full 权限，低权限用户连自己的都勾不了）
+        if (!(await hasPermission('comment'))) { alert('勾选待办需要“评论/点赞”权限，请联系管理员'); return; }
+        if (!isAdmin) {
+            try { const { data } = await sb.from('memos').select('author').eq('id', id).maybeSingle(); if (data && data.author !== currentUser) { alert('只能勾选自己发布的待办'); return; } } catch (e) {}
+        }
+        try { await sb.from('memos').update({ done }).eq('id', id); } catch (e) { console.error(e); } renderMemos({ force: true });
+    }
     async function deleteMemo(id) { if (!(await canDeleteRecord('memos', id))) return; try { await sb.from('memos').delete().eq('id', id); } catch (e) { console.error(e); } renderMemos({ force: true }); }
 
     // ---------- 行程与纪念日 ----------
@@ -1169,16 +1209,15 @@ body {
         const newSchedule = { author: currentUser, author_name: authorDisplay(currentUser), title, start_date: start, end_date: end || start, visibility: 'public' };
         try { await sb.from('schedules').insert(newSchedule); logAction('publish_schedule', { title: title.substring(0, 50), start_date: start, end_date: end || start }); } catch (e) { console.error(e); }
         document.getElementById('scheduleStart').value = ''; document.getElementById('scheduleEnd').value = ''; document.getElementById('scheduleTitle').value = '';
-        renderSchedules({ force: true });
+        renderSchedules({ force: false });
         addDanmaku(`${authorDisplay(currentUser)} 添加了新行程`);
     }
     async function renderSchedules(options = {}) {
         if (!shouldReloadSection('todo-schedules', options && options.force)) return;
         let schedules = [];
         try {
-            const { data, error } = await selectContentRows('schedules', 'id,start_date,end_date,title,author,author_name,created_at,visibility', { limit: PAGE_LIMIT });
-            if (error) throw error;
-            schedules = (data || []).map(s => ({ id: s.id, start: s.start_date, end: s.end_date, title: s.title, author: s.author, authorName: s.author_name, time: new Date(s.created_at).toLocaleString(), visibility: normalizeVisibility(s.visibility) }));
+            const rows = await getCachedRows('schedules', 'id,start_date,end_date,title,author,author_name,created_at,visibility', { limit: PAGE_LIMIT, force: options.force });
+            schedules = (rows || []).map(s => ({ id: s.id, start: s.start_date, end: s.end_date, title: s.title, author: s.author, authorName: s.author_name, time: new Date(s.created_at).toLocaleString(), visibility: normalizeVisibility(s.visibility) }));
             schedules = schedules.filter(canViewRecord);
             markSectionLoaded('todo-schedules');
         } catch (e) { markSectionFailed('todo-schedules'); document.getElementById('scheduleList').innerHTML = '<div class="empty-tip" style="color:#c00;">😵 加载失败，<a href="javascript:renderSchedules({force:true})">点击重试</a></div>'; return; }
@@ -1199,16 +1238,15 @@ body {
         const newCountdown = { author: currentUser, author_name: authorDisplay(currentUser), name, target_date: date, visibility: 'public' };
         try { await sb.from('countdowns').insert(newCountdown); logAction('publish_countdown', { name: name.substring(0, 50), target_date: date }); } catch (e) { console.error(e); }
         document.getElementById('countdownName').value = ''; document.getElementById('countdownDate').value = '';
-        renderCountdowns({ force: true });
+        renderCountdowns({ force: false });
         addDanmaku(`${authorDisplay(currentUser)} 添加了纪念日`);
     }
     async function renderCountdowns(options = {}) {
         if (!shouldReloadSection('todo-countdowns', options && options.force)) return;
         let countdowns = [];
         try {
-            const { data, error } = await selectContentRows('countdowns', 'id,name,target_date,author,author_name,created_at,visibility', { limit: PAGE_LIMIT });
-            if (error) throw error;
-            countdowns = (data || []).map(c => ({ id: c.id, name: c.name, date: c.target_date, author: c.author, authorName: c.author_name, time: new Date(c.created_at).toLocaleString(), visibility: normalizeVisibility(c.visibility) }));
+            const rows = await getCachedRows('countdowns', 'id,name,target_date,author,author_name,created_at,visibility', { limit: PAGE_LIMIT, force: options.force });
+            countdowns = (rows || []).map(c => ({ id: c.id, name: c.name, date: c.target_date, author: c.author, authorName: c.author_name, time: new Date(c.created_at).toLocaleString(), visibility: normalizeVisibility(c.visibility) }));
             countdowns = countdowns.filter(canViewRecord);
             markSectionLoaded('todo-countdowns');
         } catch (e) { markSectionFailed('todo-countdowns'); document.getElementById('countdownList').innerHTML = '<div class="empty-tip" style="color:#c00;">😵 加载失败，<a href="javascript:renderCountdowns({force:true})">点击重试</a></div>'; return; }
@@ -1236,9 +1274,9 @@ body {
     async function loadMarkers(options = {}) {
         if (!shouldReloadSection('travel', options && options.force)) return;
         try {
-            const { data, error } = await selectContentRows('travel_markers', 'id,lat,lng,name,description,author,author_name,created_at,visibility', { ascending: true, limit: MAP_LIMIT });
-            if (error) throw error;
-            markers = (data || []).map(m => ({ id: m.id, lat: m.lat, lng: m.lng, name: m.name, author: m.author, authorName: m.author_name, time: new Date(m.created_at).toLocaleString(), visibility: normalizeVisibility(m.visibility) }));
+            // 修复：按时间倒序取最新标记（原 ascending 会截掉最新标记）+ 缓存增量
+            const rows = await getCachedRows('travel_markers', 'id,lat,lng,name,description,author,author_name,created_at,visibility', { ascending: false, limit: MAP_LIMIT, force: options.force });
+            markers = (rows || []).map(m => ({ id: m.id, lat: m.lat, lng: m.lng, name: m.name, author: m.author, authorName: m.author_name, time: new Date(m.created_at).toLocaleString(), visibility: normalizeVisibility(m.visibility) }));
             markers = markers.filter(canViewRecord);
             markSectionLoaded('travel');
         } catch (e) { markSectionFailed('travel'); renderMarkerList(); return; }
@@ -1252,7 +1290,7 @@ body {
         if (!(await requirePermission('full'))) return;
         const newMarker = { lat, lng, name, author: currentUser, author_name: authorDisplay(currentUser), visibility: 'public' };
         try { await sb.from('travel_markers').insert(newMarker); logAction('publish_marker', { name: name.substring(0, 50), lat, lng }); } catch (e) { console.error(e); }
-        loadMarkers({ force: true });
+        loadMarkers({ force: false });
         addDanmaku(`${authorDisplay(currentUser)} 标记了地点：${name}`);
     }
     function addMarkerFromInput() {
@@ -1274,13 +1312,14 @@ body {
     async function toggleAngryMode() {
         if (!(await requirePermission('full'))) return;
         try {
-            const { data } = await sb.from('angry_mode').select('id,enabled,by').limit(1).single();
+            const { data } = await sb.from('angry_mode').select('id,enabled,by').limit(1).maybeSingle();
             const mode = data || { enabled: false, by: '' };
             if (mode.enabled) {
                 await sb.from('angry_mode').update({ enabled: false, by: '' }).eq('id', mode.id);
                 logAction('angry_off', {});
                 document.getElementById('angryBtn').innerText = '启用生气模式';
                 document.getElementById('angryStatus').innerHTML = '当前状态：没有生气，开开心心~';
+                sessionStorage.removeItem('couple_angry_silent');
                 alert('已取消生气模式');
             } else {
                 if (mode.id) await sb.from('angry_mode').update({ enabled: true, by: currentUser }).eq('id', mode.id);
@@ -1291,6 +1330,8 @@ body {
                 alert('生气模式已开启');
             }
         } catch (e) {
+            // 云端不可用时降级为本地状态（同时尝试补救落库，避免跨设备失效）
+            try { const { data: existing } = await sb.from('angry_mode').select('id,enabled,by').limit(1).maybeSingle(); if (existing) await sb.from('angry_mode').update({ enabled: true, by: currentUser }).eq('id', existing.id); else await sb.from('angry_mode').insert({ enabled: true, by: currentUser }); } catch (_) {}
             const mode = JSON.parse(localStorage.getItem('couple_angry') || '{"enabled":false,"by":""}');
             if (mode.enabled) { localStorage.setItem('couple_angry', JSON.stringify({ enabled: false, by: '' })); document.getElementById('angryBtn').innerText = '启用生气模式'; document.getElementById('angryStatus').innerHTML = '当前状态：没有生气，开开心心~'; }
             else { localStorage.setItem('couple_angry', JSON.stringify({ enabled: true, by: currentUser })); document.getElementById('angryBtn').innerText = '取消生气模式'; document.getElementById('angryStatus').innerHTML = '😠 已启用生气模式'; }
@@ -1301,12 +1342,14 @@ body {
         let mode = { enabled: false, by: '' };
         let ap = [];
         try {
-            const { data: modeData } = await sb.from('angry_mode').select('id,enabled,by').limit(1).single();
+            const { data: modeData } = await sb.from('angry_mode').select('id,enabled,by').limit(1).maybeSingle();
             if (modeData) mode = modeData;
             const { data: apData } = await sb.from('apologies').select('id,content,author,author_name,created_at,status').order('created_at', { ascending: false }).limit(PAGE_LIMIT);
             if (apData) ap = apData.map(a => ({ id: a.id, content: a.content, from: a.author, fromName: a.author_name, time: new Date(a.created_at).toLocaleString(), status: a.status || 'pending' }));
         } catch (e) { mode = JSON.parse(localStorage.getItem('couple_angry') || '{"enabled":false}'); ap = JSON.parse(localStorage.getItem('couple_apologies') || '[]'); }
-        if (mode.enabled && mode.by !== currentUser && currentUser && !isAdmin) document.getElementById('angryMask').style.display = 'flex';
+        // 修复：对方点了“暂不道歉”后，本会话不再强制弹遮罩打断浏览（状态仍正常显示）
+        const silent = sessionStorage.getItem('couple_angry_silent') === '1';
+        if (mode.enabled && mode.by !== currentUser && currentUser && !isAdmin && !silent) document.getElementById('angryMask').style.display = 'flex';
         if (mode.enabled) { document.getElementById('angryBtn').innerText = '取消生气模式'; document.getElementById('angryStatus').innerHTML = '😠 生气模式已开启（开启者：' + mode.by + '）'; }
         else { document.getElementById('angryBtn').innerText = '启用生气模式'; document.getElementById('angryStatus').innerHTML = '当前状态：没有生气，开开心心~'; }
         let html = ap.map(a => `<div class="list-card"><div>💔 ${escapeHtml(a.content)}</div><div class="meta"><span>${a.fromName || a.from} · ${a.time} · ${a.status === 'pass' ? '✅ 已原谅' : (a.status === 'reject' ? '❌ 未原谅' : '⏳ 待审核')}</span></div>${((mode.enabled && mode.by === currentUser) || isAdmin) && a.status === 'pending' ? `<div style="margin-top:8px;"><button class="submit-btn small" onclick="reviewApology('${a.id}',true)">原谅</button> <button class="submit-btn small ghost" onclick="reviewApology('${a.id}',false)">拒绝</button></div>` : ''}</div>`).join('');
@@ -1324,12 +1367,18 @@ body {
         document.getElementById('apologyInput').value = '';
         closeAngryMask();
     }
-    function closeAngryMask() { document.getElementById('angryMask').style.display = 'none'; }
+    function closeAngryMask(silent) { document.getElementById('angryMask').style.display = 'none'; if (silent) sessionStorage.setItem('couple_angry_silent', '1'); }
     async function reviewApology(id, pass) {
         try {
             await sb.from('apologies').update({ status: pass ? 'pass' : 'reject' }).eq('id', id);
             logAction(pass ? 'apology_pass' : 'apology_reject', { apology_id: id });
-            if (pass) { await sb.from('angry_mode').update({ enabled: false, by: '' }); alert('已原谅，和好啦~'); } else alert('未原谅，继续道歉吧~');
+            if (pass) {
+                // 修复：原谅时必须按 id 关闭生气模式，避免无过滤 update 影响全表
+                const { data: am } = await sb.from('angry_mode').select('id').limit(1).maybeSingle();
+                if (am && am.id) await sb.from('angry_mode').update({ enabled: false, by: '' }).eq('id', am.id);
+                sessionStorage.removeItem('couple_angry_silent');
+                alert('已原谅，和好啦~');
+            } else alert('未原谅，继续道歉吧~');
         } catch (e) { const ap = JSON.parse(localStorage.getItem('couple_apologies') || '[]'); const idx = ap.findIndex(a => a.id == id); if (idx >= 0) { ap[idx].status = pass ? 'pass' : 'reject'; if (pass) localStorage.setItem('couple_angry', JSON.stringify({ enabled: false, by: '' })); localStorage.setItem('couple_apologies', JSON.stringify(ap)); } }
         loadAngryData();
     }
@@ -1349,7 +1398,7 @@ body {
         else stopBubbleGenerator();
     }
     async function saveBubbleConfig() {
-        try { const { data } = await sb.from('bubble_config').select('id').limit(1).single(); if (data && data.id) await sb.from('bubble_config').update({ enabled: bubbleEnabled, interval: bubbleIntervalSec }).eq('id', data.id); else await sb.from('bubble_config').insert({ enabled: bubbleEnabled, interval: bubbleIntervalSec }); }
+        try { const { data } = await sb.from('bubble_config').select('id').limit(1).maybeSingle(); if (data && data.id) await sb.from('bubble_config').update({ enabled: bubbleEnabled, interval: bubbleIntervalSec }).eq('id', data.id); else await sb.from('bubble_config').insert({ enabled: bubbleEnabled, interval: bubbleIntervalSec }); }
         catch (e) { localStorage.setItem('couple_float_photos', JSON.stringify({ photos: floatPhotos, enabled: bubbleEnabled, interval: bubbleIntervalSec })); }
     }
     function updateToggleUI() { const t = document.getElementById('bubbleToggle'); if (bubbleEnabled) t.classList.add('active'); else t.classList.remove('active'); }
@@ -1441,15 +1490,19 @@ body {
     }
     function startAutoSync() {
         if (syncTimer) clearInterval(syncTimer);
+        let syncTick = 0;
         syncTimer = setInterval(async () => {
             if (!currentUser) return;
             const activeEl = document.activeElement;
             const isTyping = activeEl && (activeEl.tagName === 'TEXTAREA' || activeEl.tagName === 'INPUT' || (activeEl.id && (activeEl.id.startsWith('comment_input_') || activeEl.id.startsWith('msg_comment_input_'))));
             if (isTyping) return;
-            refreshCurrentSection().catch(e => console.log('自动刷新失败（不影响使用）'));
+            syncTick++;
+            // 平时增量同步（只拉新增，几KB）；每 3 次（约15分钟）全量对比一次，兜底同步删除
+            const force = (syncTick % 3 === 0);
+            refreshCurrentSection(force).catch(e => console.log('自动刷新失败（不影响使用）'));
         }, AUTO_SYNC_INTERVAL_MS);
     }
-    async function refreshCurrentSection() {
+    async function refreshCurrentSection(force = false) {
         if (!currentUser) return;
         const refreshMap = {
             message: (o) => renderMessages(o), gallery: (o) => renderFeeds(o), memory: (o) => renderMemories(o),
@@ -1458,7 +1511,7 @@ body {
             angry: (o) => loadAngryData(o), travel: (o) => loadMarkers(o)
         };
         const refresh = refreshMap[currentTab] || refreshMap.message;
-        await refresh({ force: false });
+        await refresh({ force });
     }
 
     // ---------- 图片/视频查看 ----------
@@ -1796,7 +1849,25 @@ body {
                 rows += `<tr><td style="font-size:11px;white-space:nowrap;">${new Date(log.created_at).toLocaleString()}</td><td>${log.user}</td><td>${actionLabels[log.action] || log.action}</td><td style="font-size:11px;color:#666;">${escapeHtml(details)}</td></tr>`;
             }
         } else rows = '<tr><td colspan="4" style="text-align:center;color:#999;padding:20px;">暂无日志记录</td></tr>';
-        return `<div class="admin-section"><h3>📋 操作日志 (${logs ? logs.length : 0}条)</h3><div style="max-height:400px;overflow-y:auto;"><table class="data-table"><thead><tr><th>时间</th><th>用户</th><th>操作</th><th>详情</th></tr></thead><tbody>${rows}</tbody></table></div></div>`;
+        // 修复：日志支持导出与清空（本地+云端），管理员可管理
+        return `<div class="admin-section"><h3>📋 操作日志 (${logs ? logs.length : 0}条)</h3>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px;">
+            <button class="admin-btn" onclick="exportAdminLogs()">📥 导出日志</button>
+            <button class="admin-btn danger" onclick="clearAdminLogs()">🗑️ 清空日志</button>
+        </div>
+        <div style="max-height:400px;overflow-y:auto;"><table class="data-table"><thead><tr><th>时间</th><th>用户</th><th>操作</th><th>详情</th></tr></thead><tbody>${rows}</tbody></table></div></div>`;
+    }
+    async function exportAdminLogs() {
+        const logs = await getAdminLogs();
+        downloadTextFile('操作日志.json', JSON.stringify(logs, null, 2), 'application/json;charset=utf-8');
+        alert(`已导出 ${logs.length} 条操作日志。`);
+    }
+    async function clearAdminLogs() {
+        if (!confirm('确定清空全部操作日志吗？（本地和云端都会删除）')) return;
+        try { localStorage.removeItem('admin_logs'); } catch (e) {}
+        try { await sb.from('admin_logs').delete().gt('created_at', '1970-01-01'); } catch (e) {}
+        alert('操作日志已清空');
+        renderAdminData();
     }
     async function adminDelete(type, id) {
         if (!confirm('确定要删除这条数据吗？')) return;
@@ -1919,7 +1990,8 @@ body {
         } finally { if (btn) { btn.disabled = false; btn.innerText = '登录'; } }
     }
     function runDeferredInitialLoad() {
-        const tasks = [() => loadBubbleConfig({ loadPhotos: false }), () => loadAngryData()];
+        // 修复：登录后立即加载共享照片池（不再等用户进设置），背景气泡真正生效
+        const tasks = [() => loadBubbleConfig({ loadPhotos: true }), () => loadAngryData()];
         let index = 0;
         const runNext = () => { if (index >= tasks.length || !currentUser) return; const t = tasks[index++]; Promise.resolve().then(t).catch(e => console.log('延后加载共享状态失败:', e)).finally(() => setTimeout(runNext, 250)); };
         setTimeout(runNext, 300);
@@ -1940,7 +2012,7 @@ body {
         updateAdminVisibility();
         updateActivity();
         logAction('login', { username });
-        renderMessages({ force: true }).catch(e => console.log('留言板首屏加载失败:', e));
+        renderMessages({ force: false }).catch(e => console.log('留言板首屏加载失败:', e));
         startAutoSync();
         startHeartbeat();
         setTimeout(updateOnlineStatus, 1000);
