@@ -1281,8 +1281,8 @@ body {
     async function loadMarkers(options = {}) {
         if (!shouldReloadSection('travel', options && options.force)) return;
         try {
-            // 修复：按时间倒序取最新标记（原 ascending 会截掉最新标记）+ 缓存增量
-            const rows = await getCachedRows('travel_markers', 'id,lat,lng,name,description,author,author_name,created_at,visibility', { ascending: false, limit: MAP_LIMIT, force: options.force });
+            // 修复：按时间倒序取最新标记（原 ascending 会截掉最新标记）+ 缓存增量；真实表无 description 列
+            const rows = await getCachedRows('travel_markers', 'id,lat,lng,name,author,author_name,created_at,visibility', { ascending: false, limit: MAP_LIMIT, force: options.force });
             markers = (rows || []).map(m => ({ id: m.id, lat: m.lat, lng: m.lng, name: m.name, author: m.author, authorName: m.author_name, time: new Date(m.created_at).toLocaleString(), visibility: normalizeVisibility(m.visibility) }));
             markers = markers.filter(canViewRecord);
             markSectionLoaded('travel');
@@ -1345,34 +1345,57 @@ body {
         }
         loadAngryData();
     }
+    // 修复：apologies 表真实结构探测（无 author/author_name 列时降级，避免 400 报错）
+    // 提示：在 Supabase SQL Editor 执行 ALTER TABLE 加列后可升级为云端完整记录
+    var apologyAuthorCols = null;
+    async function detectApologyCols() {
+        if (apologyAuthorCols !== null) return apologyAuthorCols;
+        try { const { data, error } = await sb.from('apologies').select('author').limit(1); apologyAuthorCols = !error; } catch (e) { apologyAuthorCols = false; }
+        return apologyAuthorCols;
+    }
     async function loadAngryData() {
         let mode = { enabled: false, by: '' };
         let ap = [];
         try {
             const { data: modeData } = await sb.from('angry_mode').select('id,enabled,by').limit(1).maybeSingle();
             if (modeData) mode = modeData;
-            const { data: apData } = await sb.from('apologies').select('id,content,author,author_name,created_at,status').order('created_at', { ascending: false }).limit(PAGE_LIMIT);
-            if (apData) ap = apData.map(a => ({ id: a.id, content: a.content, from: a.author, fromName: a.author_name, time: new Date(a.created_at).toLocaleString(), status: a.status || 'pending' }));
+            // 修复：只查真实存在的列，不再因 author 列不存在整段 400 走 localStorage
+            const hasCols = await detectApologyCols();
+            const sel = hasCols ? 'id,content,author,author_name,created_at,status' : 'id,content,created_at,status';
+            const { data: apData } = await sb.from('apologies').select(sel).order('created_at', { ascending: false }).limit(PAGE_LIMIT);
+            const cloudItems = (apData || []).map(a => ({ id: a.id, content: a.content, from: a.author || '', fromName: a.author_name || '', ts: new Date(a.created_at).getTime(), time: new Date(a.created_at).toLocaleString(), status: a.status || 'pending' }));
+            // 合并本地兜底记录（换设备前/离线提交的道歉不丢）
+            const localItems = (JSON.parse(localStorage.getItem('couple_apologies') || '[]')).map(a => ({ ...a, ts: a.ts || Date.now() }));
+            const seen = new Set(); ap = [];
+            for (const item of [...cloudItems, ...localItems]) { const k = String(item.id); if (seen.has(k)) continue; seen.add(k); ap.push(item); }
+            ap.sort((x, y) => (y.ts || 0) - (x.ts || 0));
         } catch (e) { mode = JSON.parse(localStorage.getItem('couple_angry') || '{"enabled":false}'); ap = JSON.parse(localStorage.getItem('couple_apologies') || '[]'); }
         // 修复：对方点了“暂不道歉”后，本会话不再强制弹遮罩打断浏览（状态仍正常显示）
         const silent = sessionStorage.getItem('couple_angry_silent') === '1';
         if (mode.enabled && mode.by !== currentUser && currentUser && !isAdmin && !silent) document.getElementById('angryMask').style.display = 'flex';
         if (mode.enabled) { document.getElementById('angryBtn').innerText = '取消生气模式'; document.getElementById('angryStatus').innerHTML = '😠 生气模式已开启（开启者：' + mode.by + '）'; }
         else { document.getElementById('angryBtn').innerText = '启用生气模式'; document.getElementById('angryStatus').innerHTML = '当前状态：没有生气，开开心心~'; }
-        let html = ap.map(a => `<div class="list-card"><div>💔 ${escapeHtml(a.content)}</div><div class="meta"><span>${a.fromName || a.from} · ${a.time} · ${a.status === 'pass' ? '✅ 已原谅' : (a.status === 'reject' ? '❌ 未原谅' : '⏳ 待审核')}</span></div>${((mode.enabled && mode.by === currentUser) || isAdmin) && a.status === 'pending' ? `<div style="margin-top:8px;"><button class="submit-btn small" onclick="reviewApology('${a.id}',true)">原谅</button> <button class="submit-btn small ghost" onclick="reviewApology('${a.id}',false)">拒绝</button></div>` : ''}</div>`).join('');
+        let html = ap.map(a => `<div class="list-card"><div>💔 ${escapeHtml(a.content)}</div><div class="meta"><span>${a.fromName || a.from || '某人'} · ${a.time} · ${a.status === 'pass' ? '✅ 已原谅' : (a.status === 'reject' ? '❌ 未原谅' : '⏳ 待审核')}</span></div>${((mode.enabled && mode.by === currentUser) || isAdmin) && a.status === 'pending' ? `<div style="margin-top:8px;"><button class="submit-btn small" onclick="reviewApology('${a.id}',true)">原谅</button> <button class="submit-btn small ghost" onclick="reviewApology('${a.id}',false)">拒绝</button></div>` : ''}</div>`).join('');
         document.getElementById('apologyList').innerHTML = html || '<div class="empty-tip">暂无道歉记录</div>';
     }
     async function submitApology() {
         if (!(await requirePermission('comment'))) return;
         const content = document.getElementById('apologyInput').value.trim();
         if (!content) { alert('写点道歉内容~'); return; }
+        // 修复：本地必存（秒见 + 云端不可用时不丢）+ 云端尝试写真实存在的列
+        const localRec = { id: 'local-' + Date.now(), content, from: currentUser, fromName: authorDisplay(currentUser), ts: Date.now(), time: new Date().toLocaleString(), status: 'pending' };
+        const ap = JSON.parse(localStorage.getItem('couple_apologies') || '[]'); ap.unshift(localRec); localStorage.setItem('couple_apologies', JSON.stringify(ap));
         try {
-            await sb.from('apologies').insert({ content, author: currentUser, author_name: authorDisplay(currentUser), status: 'pending' });
+            const hasCols = await detectApologyCols();
+            const payload = { content, status: 'pending', created_at: new Date().toISOString() };
+            if (hasCols) { payload.author = currentUser; payload.author_name = authorDisplay(currentUser); }
+            await sb.from('apologies').insert(payload);
             logAction('apology_submit', { content: content.substring(0, 50) });
-        } catch (e) { const ap = JSON.parse(localStorage.getItem('couple_apologies') || '[]'); ap.unshift({ id: Date.now(), content, from: currentUser, fromName: authorDisplay(currentUser), time: new Date().toLocaleString(), status: 'pending' }); localStorage.setItem('couple_apologies', JSON.stringify(ap)); }
+        } catch (e) { console.warn('道歉云端写入失败（已保存在本机）:', e); }
         alert('道歉已提交，等待TA原谅~');
         document.getElementById('apologyInput').value = '';
         closeAngryMask();
+        loadAngryData();
     }
     function closeAngryMask(silent) { document.getElementById('angryMask').style.display = 'none'; if (silent) sessionStorage.setItem('couple_angry_silent', '1'); }
     async function reviewApology(id, pass) {
@@ -1811,7 +1834,7 @@ body {
             if (type === 'memo') { const pl = { high: '🔴 高', medium: '🟡 中', low: '🟢 低' }; return `<tr><td>${escapeHtml(row.content || '').substring(0, 30)}</td><td>${row.author_name || ''}</td><td>${pl[row.priority] || row.priority || ''}</td><td>${row.done ? '✅ 已完成' : '⏳ 进行中'}</td><td>${renderVisibilityAdminControls('memo', row.id, row.visibility)}</td><td><button class="admin-btn danger" onclick="adminDelete('memo', '${row.id}')">删除</button></td></tr>`; }
             if (type === 'schedule') { const dr = row.start_date ? (row.end_date ? `${row.start_date} ~ ${row.end_date}` : row.start_date) : ''; return `<tr><td>${escapeHtml(row.title || '').substring(0, 20)}</td><td>${dr}</td><td>${row.author_name || ''}</td><td>${renderVisibilityAdminControls('schedule', row.id, row.visibility)}</td><td><button class="admin-btn danger" onclick="adminDelete('schedule', '${row.id}')">删除</button></td></tr>`; }
             if (type === 'countdown') return `<tr><td>${escapeHtml(row.name || '').substring(0, 20)}</td><td>${row.target_date || ''}</td><td>${row.author_name || ''}</td><td>${renderVisibilityAdminControls('countdown', row.id, row.visibility)}</td><td><button class="admin-btn danger" onclick="adminDelete('countdown', '${row.id}')">删除</button></td></tr>`;
-            if (type === 'marker') return `<tr><td>${escapeHtml(row.name || '').substring(0, 15)}</td><td>${escapeHtml(row.description || '').substring(0, 20)}</td><td>${row.author_name || ''}</td><td>${renderVisibilityAdminControls('marker', row.id, row.visibility)}</td><td><button class="admin-btn danger" onclick="adminDelete('marker', '${row.id}')">删除</button></td></tr>`;
+            if (type === 'marker') return `<tr><td>${escapeHtml(row.name || '').substring(0, 15)}</td><td>${row.author_name || ''}</td><td>${renderVisibilityAdminControls('marker', row.id, row.visibility)}</td><td><button class="admin-btn danger" onclick="adminDelete('marker', '${row.id}')">删除</button></td></tr>`;
             return '';
         }).join('');
     }
@@ -1828,7 +1851,7 @@ body {
             memo: { title: '📋 待办备忘录', table: 'memos', cols: 'id,content,author_name,priority,done,created_at,visibility', headers: ['内容', '作者', '优先级', '状态', '可见性', '操作'] },
             schedule: { title: '📝 行程安排', table: 'schedules', cols: 'id,title,start_date,end_date,author_name,created_at,visibility', headers: ['标题', '日期', '作者', '可见性', '操作'] },
             countdown: { title: '⏰ 纪念日倒计时', table: 'countdowns', cols: 'id,name,target_date,author_name,created_at,visibility', headers: ['标题', '目标日期', '作者', '可见性', '操作'] },
-            marker: { title: '🗺️ 旅行地图标记', table: 'travel_markers', cols: 'id,name,description,author_name,created_at,visibility', headers: ['名称', '描述', '作者', '可见性', '操作'] }
+            marker: { title: '🗺️ 旅行地图标记', table: 'travel_markers', cols: 'id,name,author_name,created_at,visibility', headers: ['名称', '作者', '可见性', '操作'] }
         };
         const config = configs[type];
         if (!config) { target.innerHTML = '<div style="color:#c00;padding:12px;">未知分类</div>'; return; }
