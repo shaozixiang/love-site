@@ -645,7 +645,7 @@ body {
         if (cached.data && cached.data.length) {
             // 秒开缓存（0 流量），后台增量拉取新增记录
             try {
-                const incQuery = sb.from(table).select(columns);
+                let incQuery = sb.from(table).select(columns);
                 if (!isAdmin && !isCoupleAccount()) incQuery = incQuery.or('visibility.is.null,visibility.eq.public');
                 const inc = await incQuery.gt('created_at', cached.syncedAt).order('created_at', { ascending: false }).limit(options.limit || PAGE_LIMIT);
                 if (inc.error) throw inc.error;
