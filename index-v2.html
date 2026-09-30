@@ -554,18 +554,21 @@ body {
     ]);
     const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
-    // ---------- 全局状态 ----------
-    let bubbleClicked = 0, bubbleReplenishTimer = null, currentUser = '', isAdmin = false, storageMode = 'cloud',
+    // 修复：状态变量用 var 并前置，避免任何时序下出现 TDZ；supabase 初始化失败不中断脚本（UI 仍可用）
+    var bubbleClicked = 0, bubbleReplenishTimer = null, currentUser = '', isAdmin = false, storageMode = 'cloud',
         map = null, markers = [], currentTab = 'message';
-    let currentUserInfo = null;
-    let lastUserSyncError = null, lastPermissionError = null;
-    let floatPhotos = [], bubbleEnabled = true, bubbleIntervalSec = 12,
+    var currentUserInfo = null;
+    var lastUserSyncError = null, lastPermissionError = null;
+    var floatPhotos = [], bubbleEnabled = true, bubbleIntervalSec = 12,
         bubbleTimer = null, activeBubbleCount = 0;
-    let currentPhotosList = [], currentPhotoIndex = -1;
-    let touchStartX = 0, touchEndX = 0;
-    window.selectedFiles = [];
-    let syncTimer = null, onlineStatusTimer = null, heartbeatInterval = null, lastActivityWrite = 0;
-    const sectionLoadedAt = {}, failedSections = {};
+    var currentPhotosList = [], currentPhotoIndex = -1;
+    var touchStartX = 0, touchEndX = 0;
+    var selectedFiles = [];
+    var syncTimer = null, onlineStatusTimer = null, heartbeatInterval = null, lastActivityWrite = 0;
+    var sectionLoadedAt = {}, failedSections = {};
+    var sb = null;
+    try { sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY); } catch (e) { console.error('Supabase 初始化失败（网络或 CDN 问题），界面仍可打开：', e); }
+    var cacheStore = {};
 
     // ---------- 工具 ----------
     function escapeHtml(str) { return String(str || '').replace(/[&<>]/g, m => m === '&' ? '&amp;' : m === '<' ? '&lt;' : '&gt;'); }
