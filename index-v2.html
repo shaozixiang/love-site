@@ -552,8 +552,6 @@ body {
         'publish_feed', 'publish_message', 'publish_love', 'publish_memory',
         'publish_memo', 'publish_schedule', 'publish_countdown', 'publish_marker'
     ]);
-    const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-
     // 修复：状态变量用 var 并前置，避免任何时序下出现 TDZ；supabase 初始化失败不中断脚本（UI 仍可用）
     var bubbleClicked = 0, bubbleReplenishTimer = null, currentUser = '', isAdmin = false, storageMode = 'cloud',
         map = null, markers = [], currentTab = 'message';
