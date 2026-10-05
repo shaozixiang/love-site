@@ -1,4 +1,4 @@
-const MAX_UPLOAD_BYTES = 60 * 1024 * 1024;
+const MAX_UPLOAD_BYTES = 95 * 1024 * 1024;
 const ALLOWED_FOLDERS = new Set(['common', 'feeds', 'messages', 'bubbles', 'avatars']);
 
 export async function onRequest(context) {

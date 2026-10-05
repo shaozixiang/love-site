@@ -693,10 +693,10 @@ body {
         try {
             const isVideo = file.type.startsWith('video/');
             const isImage = file.type.startsWith('image/');
-            if (isImage && file.size > 10 * 1024 * 1024) { alert('图片太大啦！最大支持10MB哦~'); return null; }
-            if (isVideo && file.size > 50 * 1024 * 1024) { alert('视频太大啦！最大支持50MB哦~'); return null; }
-            let uploadFile = file;
-            if (isImage && file.type !== 'image/gif') uploadFile = await compressImage(file, 2, 1280);
+            // 放开大小限制：媒体存 GitHub 仓库（单文件上限 100MB），这里只保留 95MB 兜底（GitHub/Cloudflare 物理上限）
+            if (isImage && file.size > 95 * 1024 * 1024) { alert('图片太大啦！GitHub 单文件上限 100MB，请压缩后再传~'); return null; }
+            if (isVideo && file.size > 95 * 1024 * 1024) { alert('视频太大啦！GitHub 单文件上限 100MB，请压缩后再传~'); return null; }
+            let uploadFile = file; // 原图直传，不再压缩（之前压缩到 2MB/1280px 会损失画质）
             if (window.location.protocol === 'file:') { alert('本地直接打开不能上传图片：上传接口只在部署后存在。'); return null; }
             const formData = new FormData();
             formData.append('file', uploadFile, uploadFile.name || file.name || 'media');
