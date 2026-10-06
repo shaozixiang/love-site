@@ -1592,7 +1592,17 @@ body {
         const src = currentPhotosList[currentPhotoIndex];
         document.getElementById('modalImage').src = src;
         document.getElementById('imageModal').style.display = 'flex';
-        document.getElementById('downloadImageBtn').onclick = () => { const a = document.createElement('a'); a.href = src; a.download = 'love.png'; a.click(); };
+        document.getElementById('downloadImageBtn').onclick = () => {
+            // 跨域资源直接 a.download 会被浏览器忽略，先抓成 blob 再下载
+            const a = document.createElement('a');
+            a.download = 'love.png';
+            const tryDownload = (url) => fetch(url).then(r => { if (!r.ok) throw new Error('bad status'); return r.blob(); })
+                .then(blob => { const objUrl = URL.createObjectURL(blob); a.href = objUrl; document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(objUrl), 8000); });
+            tryDownload(src)
+                .catch(() => tryDownload(bestImgSrc(src, 1)))
+                .catch(() => tryDownload(bestImgSrc(src, 2)))
+                .catch(() => { window.open(src, '_blank'); });
+        };
     }
     function prevPhoto(e) { if (e) e.stopPropagation(); if (currentPhotosList.length <= 1) return; currentPhotoIndex = (currentPhotoIndex - 1 + currentPhotosList.length) % currentPhotosList.length; updateModalImage(); }
     function nextPhoto(e) { if (e) e.stopPropagation(); if (currentPhotosList.length <= 1) return; currentPhotoIndex = (currentPhotoIndex + 1) % currentPhotosList.length; updateModalImage(); }
