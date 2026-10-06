@@ -651,6 +651,12 @@ body {
     }
     // 下载图片：抓取为 blob → 触发保存（带 CDN 容错与失败降级）
     function downloadImage(src) {
+        // 微信内置浏览器禁止自动下载，直接打开原图长按保存
+        if (/MicroMessenger/i.test(navigator.userAgent || '')) {
+            toast('📸 已打开原图，长按图片即可保存', 'success');
+            window.open(src, '_blank');
+            return;
+        }
         toast('⏳ 正在下载…');
         var a = document.createElement('a');
         a.download = 'love.png';
