@@ -602,6 +602,22 @@ body {
 
     // ---------- 工具 ----------
     function escapeHtml(str) { return String(str || '').replace(/[&<>]/g, m => m === '&' ? '&amp;' : m === '<' ? '&lt;' : '&gt;'); }
+    // 媒体 CDN 容错：jsDelivr 主域名不通时自动换备用节点重试
+    var IMG_CDNS = ['https://cdn.jsdelivr.net', 'https://fastly.jsdelivr.net', 'https://gcore.jsdelivr.net', 'https://testingcf.jsdelivr.net'];
+    function bestImgSrc(url, n) {
+        var m = String(url).match(/^https:\/\/[^/]+/);
+        if (!m) return url;
+        var idx = IMG_CDNS.indexOf(m[0]);
+        if (idx < 0) return url;
+        return url.replace(m[0], IMG_CDNS[(idx + (n || 1)) % IMG_CDNS.length]);
+    }
+    function tryFallback(el) {
+        if (!el || !el.src) return;
+        var tries = parseInt(el.getAttribute('data-fb') || '0', 10);
+        if (tries >= IMG_CDNS.length - 1) return; // 所有节点都试过则停止
+        el.setAttribute('data-fb', tries + 1);
+        el.src = bestImgSrc(el.src, 1);
+    }
     function formatPrettyDate(dateStr) {
         if (!dateStr) return '';
         const p = String(dateStr).split('-');
@@ -924,9 +940,9 @@ body {
                     if (!url) return '';
                     const single = md.length === 1 ? ' single' : '';
                     if (media.type === 'video') {
-                        return `<div class="grid-cell${single} video-cell" onclick="openVideoModal('${url}')"><video src="${url}" preload="metadata" muted playsinline webkit-playsinline loading="lazy" referrerpolicy="no-referrer"></video><span class="play-badge"></span></div>`;
+                        return `<div class="grid-cell${single} video-cell" onclick="openVideoModal('${url}')"><video src="${url}" preload="metadata" muted playsinline webkit-playsinline loading="lazy" referrerpolicy="no-referrer" onerror="tryFallback(this)"></video><span class="play-badge"></span></div>`;
                     }
-                    return `<div class="grid-cell${single}" onclick="openImageModal('${url}')"><img src="${url}" loading="lazy" decoding="async" referrerpolicy="no-referrer"></div>`;
+                    return `<div class="grid-cell${single}" onclick="openImageModal('${url}')"><img src="${url}" loading="lazy" decoding="async" referrerpolicy="no-referrer" onerror="tryFallback(this)"></div>`;
                 }).join('');
                 mediaHtml = `<div class="feed-grid">${cells}</div>`;
             }
@@ -1056,7 +1072,7 @@ body {
         let html = msgs.map(m => {
             const canDelete = isAdmin || m.author === currentUser;
             // 留言图片直接显示（无“查看图片”按钮）
-            const photoHtml = m.photo ? `<img class="msg-photo" src="${m.photo}" loading="lazy" decoding="async" referrerpolicy="no-referrer" onclick="openImageModal('${m.photo}')">` : '';
+            const photoHtml = m.photo ? `<img class="msg-photo" src="${m.photo}" loading="lazy" decoding="async" referrerpolicy="no-referrer" onerror="tryFallback(this)" onclick="openImageModal('${m.photo}')">` : '';
             let commentsHtml = `<div class="feed-comments" style="margin-top:10px; border-top:1px solid #fdf0f3; padding-top:10px;">`;
             if (m.comments && m.comments.length) {
                 for (let ci = 0; ci < m.comments.length; ci++) {
