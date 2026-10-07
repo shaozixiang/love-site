@@ -7,7 +7,6 @@
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <script>
-    /* supabase-js v2 内联（UMD）——不再依赖 CDN，杜绝“浏览器打不开/白屏” */
 /**
  * Skipped minification because the original files appears to be already minified.
  * Original file: /npm/@supabase/supabase-js@2.117.2/dist/umd/supabase.js
@@ -717,10 +716,11 @@ body {
         try { await doDelete(); toast(successMsg || '✅ 删除成功', 'success'); return true; }
         catch (e) { console.error(e); toast('❌ 删除失败：' + (e.message || '未知错误'), 'error'); return false; }
     }
-    // 头像辅助：有头像图用图，否则用 emoji
-    function authorAvatarHtml(author) {
+    // 头像辅助：有头像图用图；无头像时若显示名已带 emoji 则不重复加
+    function authorAvatarHtml(author, displayName) {
         const u = (window.__usersCache || {})[author];
         if (u && u.avatar) return `<img class="avatar-xs" src="${u.avatar}" alt="">`;
+        if (displayName && /^[👦👧😍🤗💖❤️]/.test(displayName)) return '';
         return author === 'girl' ? '👧' : '👦';
     }
     // 下载图片：抓取为 blob → 触发保存（带 CDN 容错与失败降级）
@@ -1102,7 +1102,7 @@ body {
                 ${canDelete ? `<button class="submit-btn small ghost" style="margin-left:auto;" onclick="deleteFeed('${feed.id}')">删除</button>` : ''}
             </div>`;
             html += `<div class="feed-card">
-                <div class="feed-head"><div class="feed-avatar">${authorAvatarHtml(feed.author)}</div><div><div class="feed-author">${feed.authorName}</div><div class="feed-time">${feed.time}</div></div></div>
+                <div class="feed-head"><div class="feed-avatar">${authorAvatarHtml(feed.author, feed.authorName)}</div><div><div class="feed-author">${feed.authorName}</div><div class="feed-time">${feed.time}</div></div></div>
                 ${feed.desc ? `<div class="feed-desc">${escapeHtml(feed.desc)}</div>` : ''}
                 ${mediaHtml}${likeHtml}${commentsHtml}
             </div>`;
@@ -1235,7 +1235,7 @@ body {
             </div>`;
             return `<div class="list-card">
                 <div>💬 ${escapeHtml(m.content)}</div>${photoHtml}
-                <div class="meta"><span class="who">${authorAvatarHtml(m.author)}${m.author_name}</span><span>${m.time}</span>${canDelete ? `<button class="submit-btn small ghost" onclick="deleteMsg('${m.id}')">删除</button>` : ''}</div>
+                <div class="meta"><span class="who">${authorAvatarHtml(m.author, m.author_name)}${m.author_name}</span><span>${m.time}</span>${canDelete ? `<button class="submit-btn small ghost" onclick="deleteMsg('${m.id}')">删除</button>` : ''}</div>
                 ${msgLikeHtml}${commentsHtml}
             </div>`;
         }).join('');
