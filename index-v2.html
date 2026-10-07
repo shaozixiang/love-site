@@ -1918,9 +1918,10 @@ body {
         try {
             const cfg = await accountApi('getNotifyConfig');
             const ejs = cfg.emailjs || {};
-            if (document.getElementById('notifyPublicKey')) document.getElementById('notifyPublicKey').value = ejs.publicKey || '';
-            if (document.getElementById('notifyServiceId')) document.getElementById('notifyServiceId').value = ejs.serviceId || '';
-            if (document.getElementById('notifyTemplateId')) document.getElementById('notifyTemplateId').value = ejs.templateId || '';
+            // 只在云端已有配置时才填入，避免覆盖用户正在填写的内容
+            if (ejs.publicKey && document.getElementById('notifyPublicKey')) document.getElementById('notifyPublicKey').value = ejs.publicKey;
+            if (ejs.serviceId && document.getElementById('notifyServiceId')) document.getElementById('notifyServiceId').value = ejs.serviceId;
+            if (ejs.templateId && document.getElementById('notifyTemplateId')) document.getElementById('notifyTemplateId').value = ejs.templateId;
         } catch (e) { console.warn('读取通知配置失败:', e); }
     }
     async function saveNotifyConfig() {
