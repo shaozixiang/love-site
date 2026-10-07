@@ -249,6 +249,10 @@ body {
 .toast.error { background:rgba(220,60,60,.92); }
 .toast.hide { opacity:0; transform:translateY(-10px); transition:opacity .3s, transform .3s; }
 @keyframes toastIn { from{opacity:0; transform:translateY(-10px) scale(.95)} to{opacity:1; transform:translateY(0) scale(1)} }
+
+/* 小头像 */
+.avatar-xs { width:20px; height:20px; border-radius:50%; object-fit:cover; vertical-align:-4px; margin-right:4px; border:1px solid #ffd8e0; }
+.feed-avatar .avatar-xs { width:38px; height:38px; vertical-align:middle; margin-right:0; }
     </style>
 <body>
     <!-- 解锁门 -->
@@ -293,6 +297,7 @@ body {
                 <div class="settings-dropdown" style="position:relative;">
                     <button class="gear-btn" onclick="toggleDropdown()">⚙️ ▼</button>
                     <div class="dropdown-menu" id="dropdownMenu">
+                        <button onclick="openEmailModal()">📧 我的邮箱</button>
                         <button onclick="openPasswordModal()">修改密码</button>
                         <button onclick="openAdminPanel()" id="adminEntryBtn" style="display:none;">🔧 管理后台</button>
                         <button class="danger" onclick="logout()">退出登录</button>
@@ -488,6 +493,17 @@ body {
         </div>
     </div>
 
+    <!-- 我的邮箱 -->
+    <div id="emailModal" class="modal-overlay">
+        <div class="modal-card">
+            <span class="close-modal" onclick="closeModalById('emailModal')">&times;</span>
+            <h3>📧 我的邮箱</h3>
+            <input type="email" id="myEmailInput" placeholder="填你的 QQ 邮箱，对方更新时通知你">
+            <div style="font-size:12px;color:#888;margin-bottom:10px;">填了邮箱后，对方在网站发动态 / 留言 / 点赞时，你会收到邮件通知。留空则不接收通知。</div>
+            <button class="submit-btn" onclick="saveMyEmail()" style="width:100%;">保存邮箱</button>
+        </div>
+    </div>
+
     <!-- 注册 -->
     <div id="registerModal" class="modal-overlay">
         <div class="modal-card">
@@ -648,6 +664,64 @@ body {
             if (!r.ok) throw new Error('bad status');
             return r;
         });
+    }
+    // 邮箱通知：对方有新动态/留言/点赞时，给对方的邮箱发邮件（EmailJS 中继，发件显示为配置的 QQ 邮箱）
+    async function notifyEvent(kind, detail) {
+        try {
+            const cfg = await accountApi('getNotifyConfig');
+            const ejs = cfg.emailjs || {};
+            if (!ejs.publicKey || !ejs.serviceId || !ejs.templateId) return; // 未配置 EmailJS 则静默跳过
+            const recipients = Object.entries(cfg.emails || {}).filter(([u]) => u !== currentUser).map(([, e]) => e);
+            if (!recipients.length) return;
+            const who = authorDisplay(currentUser);
+            const texts = {
+                feed: `${who} 在时光相册发布了新内容${detail ? '：' + String(detail).slice(0, 60) : ''}`,
+                message: `${who} 在留言板写了一条留言${detail ? '：' + String(detail).slice(0, 60) : ''}`,
+                like: `${who} 点赞了你的内容`
+            };
+            const message = texts[kind] || `${who} 在情侣小站有了新动态`;
+            for (const to of recipients) {
+                try {
+                    await fetch('https://api.emailjs.com/api/v1.0/email/send', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            service_id: ejs.serviceId,
+                            template_id: ejs.templateId,
+                            user_id: ejs.publicKey,
+                            template_params: { to_email: to, from_name: '我们的专属小站', message }
+                        })
+                    });
+                } catch (e) { console.warn('通知发送失败（不影响正常使用）:', e); }
+            }
+        } catch (e) { console.warn('通知配置读取失败（不影响正常使用）:', e); }
+    }
+    async function openEmailModal() {
+        let current = '';
+        try { const cfg = await accountApi('getNotifyConfig'); current = (cfg.emails && cfg.emails[currentUser]) || ''; } catch (e) {}
+        document.getElementById('myEmailInput').value = current;
+        document.getElementById('emailModal').style.display = 'flex';
+    }
+    async function saveMyEmail() {
+        const email = document.getElementById('myEmailInput').value.trim();
+        if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { toast('⚠️ 邮箱格式不正确', 'error'); return; }
+        try {
+            await accountApi('setMyEmail', { email });
+            toast('✅ 邮箱已保存，对方有更新时会通知到这里', 'success');
+            closeModalById('emailModal');
+        } catch (e) { toast('❌ 保存失败：' + e.message, 'error'); }
+    }
+    // 统一删除流程：询问 → 确认 → 成功/失败提示
+    async function confirmAndDelete(message, doDelete, successMsg) {
+        if (!window.confirm(message)) return false;
+        try { await doDelete(); toast(successMsg || '✅ 删除成功', 'success'); return true; }
+        catch (e) { console.error(e); toast('❌ 删除失败：' + (e.message || '未知错误'), 'error'); return false; }
+    }
+    // 头像辅助：有头像图用图，否则用 emoji
+    function authorAvatarHtml(author) {
+        const u = (window.__usersCache || {})[author];
+        if (u && u.avatar) return `<img class="avatar-xs" src="${u.avatar}" alt="">`;
+        return author === 'girl' ? '👧' : '👦';
     }
     // 下载图片：抓取为 blob → 触发保存（带 CDN 容错与失败降级）
     function downloadImage(src) {
@@ -838,10 +912,10 @@ body {
     }
     function userArrayToMap(list = []) { const map = {}; (list || []).forEach(u => { if (u && u.username) map[u.username] = normalizeUserInfo(u.username, u); }); return map; }
     function normalizeUsers(users) { const n = {}; for (let [u, i] of Object.entries(users || {})) n[u] = normalizeUserInfo(u, i); return n; }
-    function getCacheSafeUsers(users) { const n = normalizeUsers(users), c = {}; for (let [u, i] of Object.entries(n)) c[u] = { avatar: '', permission: i.permission, role: i.role }; return c; }
+    function getCacheSafeUsers(users) { const n = normalizeUsers(users), c = {}; for (let [u, i] of Object.entries(n)) c[u] = { avatar: i.avatar, permission: i.permission, role: i.role }; return c; }
     function safeSetLocalStorage(key, value) { try { localStorage.setItem(key, value); return true; } catch (e) { console.warn('本地缓存写入失败，不影响云端数据:', e); try { localStorage.removeItem(key); } catch (_) {} return false; } }
-    function cacheUsersLocally(users) { return safeSetLocalStorage('couple_users', JSON.stringify(getCacheSafeUsers(users))); }
-    function loadCachedUsers(defaultUsers = {}) { try { const c = localStorage.getItem('couple_users'); return c ? normalizeUsers(JSON.parse(c)) : defaultUsers; } catch (e) { console.warn('本地用户缓存读取失败:', e); try { localStorage.removeItem('couple_users'); } catch (_) {} return defaultUsers; } }
+    function cacheUsersLocally(users) { window.__usersCache = users; return safeSetLocalStorage('couple_users', JSON.stringify(getCacheSafeUsers(users))); }
+    function loadCachedUsers(defaultUsers = {}) { try { const c = localStorage.getItem('couple_users'); const users = c ? normalizeUsers(JSON.parse(c)) : defaultUsers; window.__usersCache = users; return users; } catch (e) { console.warn('本地用户缓存读取失败:', e); try { localStorage.removeItem('couple_users'); } catch (_) {} return defaultUsers; } }
     async function forceRefreshUserData(options = {}) {
         const allowLocalFallback = options.allowLocalFallback !== false;
         try {
@@ -972,6 +1046,7 @@ body {
         if (btn) { btn.disabled = false; btn.innerText = '📤 发送动态'; }
         renderFeeds({ force: false });
         addDanmaku(`${authorDisplay(currentUser)} 发布了新动态！`);
+        notifyEvent('feed', desc);
     }
     async function renderFeeds(options = {}) {
         if (!shouldReloadSection('gallery', options && options.force)) return;
@@ -1027,7 +1102,7 @@ body {
                 ${canDelete ? `<button class="submit-btn small ghost" style="margin-left:auto;" onclick="deleteFeed('${feed.id}')">删除</button>` : ''}
             </div>`;
             html += `<div class="feed-card">
-                <div class="feed-head"><div class="feed-avatar">${feed.authorName && feed.authorName.includes('girl') ? '👧' : '👦'}</div><div><div class="feed-author">${feed.authorName}</div><div class="feed-time">${feed.time}</div></div></div>
+                <div class="feed-head"><div class="feed-avatar">${authorAvatarHtml(feed.author)}</div><div><div class="feed-author">${feed.authorName}</div><div class="feed-time">${feed.time}</div></div></div>
                 ${feed.desc ? `<div class="feed-desc">${escapeHtml(feed.desc)}</div>` : ''}
                 ${mediaHtml}${likeHtml}${commentsHtml}
             </div>`;
@@ -1059,6 +1134,7 @@ body {
         addDanmaku(`${authorDisplay(currentUser)} 评论了动态`);
     }
     async function deleteComment(feedId, commentIdx) {
+        if (!window.confirm('确定删除这条评论吗？删除后无法恢复')) return;
         try {
             const { data } = await sb.from('feeds').select('comments').eq('id', feedId).single();
             if (data) {
@@ -1069,12 +1145,15 @@ body {
                 await sb.from('feeds').update({ comments: currentComments }).eq('id', feedId);
                 logAction('delete_comment_feed', { feed_id: feedId, comment_author: deletedComment ? deletedComment.author : 'unknown' });
             }
-        } catch (e) { console.error(e); }
+            toast('✅ 评论已删除', 'success');
+        } catch (e) { console.error(e); toast('❌ 删除失败：' + (e.message || '未知错误'), 'error'); }
         renderFeeds({ force: true });
     }
     async function deleteFeed(id) {
         if (!(await canDeleteRecord('feeds', id))) return;
-        try { await sb.from('feeds').delete().eq('id', id); logAction('delete_feed', { feed_id: id }); } catch (e) { console.error(e); }
+        if (!window.confirm('确定删除这条动态吗？删除后无法恢复')) return;
+        try { await sb.from('feeds').delete().eq('id', id); logAction('delete_feed', { feed_id: id }); toast('✅ 动态已删除', 'success'); }
+        catch (e) { console.error(e); toast('❌ 删除失败：' + (e.message || '未知错误'), 'error'); }
         renderFeeds({ force: true });
     }
     async function toggleFeedLike(feedId) {
@@ -1090,6 +1169,7 @@ body {
             const { error: updateError } = await sb.from('feeds').update({ likes: currentLikes }).eq('id', feedId);
             if (updateError) throw updateError;
             renderFeeds({ force: true });
+            if (!hasLiked) notifyEvent('like', feedId);
         } catch (e) { console.error('点赞失败:', e); alert('点赞失败：' + (e.message || '未知错误')); }
     }
 
@@ -1112,6 +1192,7 @@ body {
         if (btn) { btn.disabled = false; btn.innerText = '发送留言'; }
         renderMessages({ force: false });
         addDanmaku(`${authorDisplay(currentUser)} 在留言板说了悄悄话`);
+        notifyEvent('message', content);
     }
     async function renderMessages(options = {}) {
         if (!shouldReloadSection('message', options && options.force)) return;
@@ -1154,7 +1235,7 @@ body {
             </div>`;
             return `<div class="list-card">
                 <div>💬 ${escapeHtml(m.content)}</div>${photoHtml}
-                <div class="meta"><span class="who">${m.author_name}</span><span>${m.time}</span>${canDelete ? `<button class="submit-btn small ghost" onclick="deleteMsg('${m.id}')">删除</button>` : ''}</div>
+                <div class="meta"><span class="who">${authorAvatarHtml(m.author)}${m.author_name}</span><span>${m.time}</span>${canDelete ? `<button class="submit-btn small ghost" onclick="deleteMsg('${m.id}')">删除</button>` : ''}</div>
                 ${msgLikeHtml}${commentsHtml}
             </div>`;
         }).join('');
@@ -1185,6 +1266,7 @@ body {
         inputEl.value = '';
     }
     async function deleteMsgComment(msgId, commentIdx) {
+        if (!window.confirm('确定删除这条回复吗？删除后无法恢复')) return;
         try {
             const { data } = await sb.from('messages').select('comments').eq('id', msgId).single();
             if (data) {
@@ -1195,12 +1277,15 @@ body {
                 await sb.from('messages').update({ comments: currentComments }).eq('id', msgId);
                 logAction('delete_comment_message', { msg_id: msgId, comment_author: deletedComment ? deletedComment.author : 'unknown' });
             }
-        } catch (e) { console.error(e); }
+            toast('✅ 回复已删除', 'success');
+        } catch (e) { console.error(e); toast('❌ 删除失败：' + (e.message || '未知错误'), 'error'); }
         renderMessages({ force: true });
     }
     async function deleteMsg(id) {
         if (!(await canDeleteRecord('messages', id))) return;
-        try { await sb.from('messages').delete().eq('id', id); logAction('delete_message', { msg_id: id }); } catch (e) { console.error(e); }
+        if (!window.confirm('确定删除这条留言吗？删除后无法恢复')) return;
+        try { await sb.from('messages').delete().eq('id', id); logAction('delete_message', { msg_id: id }); toast('✅ 留言已删除', 'success'); }
+        catch (e) { console.error(e); toast('❌ 删除失败：' + (e.message || '未知错误'), 'error'); }
         renderMessages({ force: true });
     }
     async function toggleMessageLike(msgId) {
@@ -1216,6 +1301,7 @@ body {
             const { error: updateError } = await sb.from('messages').update({ likes: currentLikes }).eq('id', msgId);
             if (updateError) throw updateError;
             renderMessages({ force: true });
+            if (!hasLiked) notifyEvent('like', msgId);
         } catch (e) { console.error('点赞失败:', e); alert('点赞失败：' + (e.message || '未知错误')); }
     }
 
@@ -1247,7 +1333,7 @@ body {
         }).join('');
         document.getElementById('loveList').innerHTML = html || '<div class="empty-tip">暂无感动的话</div>';
     }
-    async function deleteLove(id) { if (!(await canDeleteRecord('loves', id))) return; try { await sb.from('loves').delete().eq('id', id); } catch (e) { console.error(e); } renderLoves({ force: true }); }
+    async function deleteLove(id) { if (!(await canDeleteRecord('loves', id))) return; if (!window.confirm('确定删除这条感动的话吗？删除后无法恢复')) return; try { await sb.from('loves').delete().eq('id', id); toast('✅ 已删除', 'success'); } catch (e) { console.error(e); toast('❌ 删除失败', 'error'); } renderLoves({ force: true }); }
 
     // ---------- 一起做过的事 ----------
     async function addMemory() {
@@ -1272,7 +1358,7 @@ body {
         let html = mem.map(m => { const canDelete = isAdmin || m.author === currentUser; return `<div class="list-card"><div>✨ ${escapeHtml(m.content)}</div><div class="meta"><span class="who">${m.authorName}</span><span>${m.time}</span>${canDelete ? `<button class="submit-btn small ghost" onclick="deleteMemory('${m.id}')">删除</button>` : ''}</div></div>`; }).join('');
         document.getElementById('memoryList').innerHTML = html || '<div class="empty-tip">暂无打卡记录</div>';
     }
-    async function deleteMemory(id) { if (!(await canDeleteRecord('memories', id))) return; try { await sb.from('memories').delete().eq('id', id); } catch (e) { console.error(e); } renderMemories({ force: true }); }
+    async function deleteMemory(id) { if (!(await canDeleteRecord('memories', id))) return; if (!window.confirm('确定删除这条回忆吗？删除后无法恢复')) return; try { await sb.from('memories').delete().eq('id', id); toast('✅ 已删除', 'success'); } catch (e) { console.error(e); toast('❌ 删除失败', 'error'); } renderMemories({ force: true }); }
 
     // ---------- 待办备忘录 ----------
     async function addMemo() {
@@ -1312,7 +1398,7 @@ body {
         }
         try { await sb.from('memos').update({ done }).eq('id', id); } catch (e) { console.error(e); } renderMemos({ force: true });
     }
-    async function deleteMemo(id) { if (!(await canDeleteRecord('memos', id))) return; try { await sb.from('memos').delete().eq('id', id); } catch (e) { console.error(e); } renderMemos({ force: true }); }
+    async function deleteMemo(id) { if (!(await canDeleteRecord('memos', id))) return; if (!window.confirm('确定删除这条待办吗？删除后无法恢复')) return; try { await sb.from('memos').delete().eq('id', id); toast('✅ 已删除', 'success'); } catch (e) { console.error(e); toast('❌ 删除失败', 'error'); } renderMemos({ force: true }); }
 
     // ---------- 行程与纪念日 ----------
     async function addSchedule() {
@@ -1344,7 +1430,7 @@ body {
         }).join('');
         document.getElementById('scheduleList').innerHTML = html || '<div class="empty-tip">暂无行程，添加你们的旅行计划吧~</div>';
     }
-    async function deleteSchedule(id) { if (!(await canDeleteRecord('schedules', id))) return; try { await sb.from('schedules').delete().eq('id', id); } catch (e) { console.error(e); } renderSchedules({ force: true }); }
+    async function deleteSchedule(id) { if (!(await canDeleteRecord('schedules', id))) return; if (!window.confirm('确定删除这条行程吗？删除后无法恢复')) return; try { await sb.from('schedules').delete().eq('id', id); toast('✅ 已删除', 'success'); } catch (e) { console.error(e); toast('❌ 删除失败', 'error'); } renderSchedules({ force: true }); }
     async function addCountdown() {
         if (!(await requirePermission('full'))) return;
         const name = document.getElementById('countdownName').value.trim();
@@ -1376,7 +1462,7 @@ body {
         }
         document.getElementById('countdownList').innerHTML = html || '<div class="empty-tip">暂无纪念日，添加你们的特殊日子吧~</div>';
     }
-    async function deleteCountdown(id) { if (!(await canDeleteRecord('countdowns', id))) return; try { await sb.from('countdowns').delete().eq('id', id); } catch (e) { console.error(e); } renderCountdowns({ force: true }); }
+    async function deleteCountdown(id) { if (!(await canDeleteRecord('countdowns', id))) return; if (!window.confirm('确定删除这个倒计时吗？删除后无法恢复')) return; try { await sb.from('countdowns').delete().eq('id', id); toast('✅ 已删除', 'success'); } catch (e) { console.error(e); toast('❌ 删除失败', 'error'); } renderCountdowns({ force: true }); }
 
     // ---------- 旅行地图 ----------
     function initMap() {
@@ -1421,7 +1507,7 @@ body {
         }
         document.getElementById('markerList').innerHTML = html || '<div class="empty-tip">暂无标记，点击地图添加回忆地点~</div>';
     }
-    async function deleteMarker(id) { if (!(await canDeleteRecord('travel_markers', id))) return; try { await sb.from('travel_markers').delete().eq('id', id); } catch (e) { console.error(e); } loadMarkers({ force: true }); }
+    async function deleteMarker(id) { if (!(await canDeleteRecord('travel_markers', id))) return; if (!window.confirm('确定删除这个地点吗？删除后无法恢复')) return; try { await sb.from('travel_markers').delete().eq('id', id); toast('✅ 已删除', 'success'); } catch (e) { console.error(e); toast('❌ 删除失败', 'error'); } loadMarkers({ force: true }); }
 
     // ---------- 生气模式 ----------
     async function toggleAngryMode() {
@@ -1600,7 +1686,7 @@ body {
     function startHeartbeat() { updateActivity(); if (heartbeatInterval) clearInterval(heartbeatInterval); heartbeatInterval = setInterval(updateActivity, ONLINE_STATUS_INTERVAL_MS); }
     function stopHeartbeat() { if (heartbeatInterval) { clearInterval(heartbeatInterval); heartbeatInterval = null; } if (onlineStatusTimer) { clearInterval(onlineStatusTimer); onlineStatusTimer = null; } }
     async function updateOnlineStatus() {
-        if (!currentUser || currentUser === 'admin') return;
+        if (!currentUser) return;
         try {
             const { user: otherUser } = await accountApi('onlineStatus');
             if (!otherUser) return;
@@ -1787,142 +1873,70 @@ body {
                 const permLabels = { 'full': '✏️ 完全权限', 'comment': '💬 仅评论', 'view': '👀 仅浏览' };
                 const permLabel = isAdminUser ? '👑 不受限制' : (permLabels[permission] || '✏️ 完全权限');
                 html += `<tr><td>${uname}</td><td>${roleLabel}</td><td>${permLabel}</td><td>
-                    <button class="admin-btn" onclick="openSetUserPasswordModal('${uname}')">设置密码</button>
+                    ${uname === 'admin' ? '' : `<button class="admin-btn" onclick="openSetUserPasswordModal('${uname}')">设置密码</button>`}
                     ${uname === 'admin' ? '' : `<button class="admin-btn" onclick="toggleUserRole('${uname}')">${isAdminUser ? '取消管理员' : '设为管理员'}</button>`}
                     ${isAdminUser ? '' : `<div style="margin-top:5px;"><select onchange="setUserPermission('${uname}', this.value)" style="padding:4px 8px;border-radius:5px;border:1px solid #ddd;font-size:12px;"><option value="full" ${permission === 'full' ? 'selected' : ''}>✏️ 完全权限</option><option value="comment" ${permission === 'comment' ? 'selected' : ''}>💬 仅评论</option><option value="view" ${permission === 'view' ? 'selected' : ''}>👀 仅浏览</option></select></div>`}
                     ${isAdminUser ? '' : `<button class="admin-btn danger" onclick="deleteUserAccount('${uname}')">删除账号</button>`}
                 </td></tr>`;
             }
             html += `</tbody></table></div>`;
-            html += renderQqSyncPanel();
+            html += renderNotifyConfigPanel();
             html += renderAdminSectionShell();
             html += '<div id="adminLogSection" class="admin-section" style="color:#888;">操作日志正在后台加载...</div>';
             document.getElementById('adminContent').innerHTML = html;
             setTimeout(() => {
                 renderAdminLogSection().then(sectionHtml => { const target = document.getElementById('adminLogSection'); if (target) target.outerHTML = sectionHtml; }).catch(e => { const target = document.getElementById('adminLogSection'); if (target) target.innerHTML = '操作日志加载失败，不影响其他后台功能。'; });
+                loadNotifyConfigIntoForm();
             }, 300);
         } catch (e) {
             if (adminContent) adminContent.innerHTML = `<div class="admin-section" style="color:#c00;line-height:1.7;">后台加载失败：${escapeHtml(e.message || String(e))}<br>请刷新后重试，或先确认 Supabase 表字段已经执行最新 SQL。</div>`;
         }
     }
-    function renderQqSyncPanel() {
-        return `<div class="admin-section qq-sync-panel">
-            <div class="qq-sync-hero">
-                <div>
-                    <h3 class="qq-sync-title">QQ空间同步备份 <span class="badge" style="background:#fff;color:#d6336c;border:1px solid #ffd8e0;border-radius:999px;padding:3px 10px;font-size:11px;">半自动</span></h3>
-                    <div class="qq-sync-desc" style="color:#666;font-size:13px;line-height:1.7;max-width:720px;margin-top:8px;">只导出公开内容，已“对外隐藏”和私密内容不会进入同步包。发布文案会自动写上“自动备份至QQ空间”、发布者、原发布时间和分类。</div>
-                </div>
-                <div class="qq-sync-actions" style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px;">
-                    <button class="admin-btn" style="background:linear-gradient(135deg,#27c2ff,#1e90ff);" onclick="exportQqSyncQueue()">导出待同步内容</button>
-                    <button class="admin-btn" style="background:linear-gradient(135deg,#ff9bb0,#ff6b81);" onclick="exportQqSyncPreview()">查看发布预览</button>
-                    <button class="admin-btn" style="background:linear-gradient(135deg,#8fd16f,#52c41a);" onclick="document.getElementById('qqSyncResultInput').click()">导入发布结果</button>
-                    <input id="qqSyncResultInput" type="file" accept="application/json,.json" style="display:none" onchange="importQqSyncResult(this.files[0]); this.value='';">
+    function renderNotifyConfigPanel() {
+        return `<div class="admin-section">
+            <h3>📧 邮箱通知 · 对方更新时自动发邮件</h3>
+            <div style="font-size:12px;color:#888;line-height:1.7;margin-bottom:10px;">
+                对方在网站发动态 / 留言 / 点赞时，会自动给你绑定的邮箱发通知。<br>
+                1️⃣ 先到 <b>EmailJS</b>（www.emailjs.com，免费）注册账号；<br>
+                2️⃣ 添加一个邮箱服务：选 SMTP，主机 smtp.qq.com、端口 465、填你的 QQ 邮箱和<b>QQ邮箱授权码</b>（QQ邮箱设置→账户→开启SMTP服务获取）；<br>
+                3️⃣ 创建模板，变量用 <code>to_email</code>、<code>from_name</code>、<code>message</code>（邮件内容写“对方更新了”之类即可）；<br>
+                4️⃣ 把下面的公钥 / 服务ID / 模板ID 填进来，点“发送测试邮件”。<br>
+                ⚠️ 记得在 EmailJS 控制台把允许域名设为 <b>love-site-2am.pages.dev</b>，防止别人盗用。
+            </div>
+            <div style="display:flex;flex-direction:column;gap:8px;max-width:420px;">
+                <input id="notifyPublicKey" class="common-input" placeholder="EmailJS Public Key (公钥)" value="">
+                <input id="notifyServiceId" class="common-input" placeholder="EmailJS Service ID (服务ID)" value="">
+                <input id="notifyTemplateId" class="common-input" placeholder="EmailJS Template ID (模板ID)" value="">
+                <div style="display:flex;gap:8px;flex-wrap:wrap;">
+                    <button class="admin-btn" onclick="saveNotifyConfig()">💾 保存配置</button>
+                    <button class="admin-btn" style="background:linear-gradient(135deg,#8fd16f,#52c41a);" onclick="testNotifyEmail()">📨 发送测试邮件</button>
                 </div>
             </div>
-            <div class="qq-sync-stats">
-                <div class="qq-sync-stat"><strong>1</strong><span>先点“导出待同步内容”，得到 待同步内容.json</span></div>
-                <div class="qq-sync-stat"><strong>2</strong><span>再双击本地 启动QQ空间同步.bat 发布</span></div>
-                <div class="qq-sync-stat"><strong>3</strong><span>最后点“导入发布结果”，成功项下次会跳过</span></div>
-            </div>
-            <div class="qq-sync-note">提示：第一次使用前，请先在 Supabase SQL Editor 运行 docs/supabase-qzone-sync.sql。导出时如果提示字段不存在，就是这一步还没做。</div>
         </div>`;
     }
-    function getQqSyncStatusLabel(status) { const l = { pending: '待同步', synced: '已同步', failed: '同步失败', skipped: '已跳过' }; return l[status || 'pending'] || '待同步'; }
-    function getQqSourceLabel(table) { const l = { feeds: '时光相册', messages: '留言板', loves: '感动的话', memories: '一起做过的事' }; return l[table] || table; }
-    function getAuthorDisplayName(row) { return row.author_name || (row.author === 'boy' ? 'boy' : (row.author === 'girl' ? 'girl' : (row.author || '未知'))); }
-    function formatDateTimeText(value) { if (!value) return ''; try { const d = new Date(value); if (Number.isNaN(d.getTime())) return String(value); return d.toLocaleString('zh-CN', { hour12: false }); } catch (e) { return String(value); } }
-    function extractQqMediaItems(table, row) {
-        const photos = [], videos = [];
-        if (table === 'feeds' && Array.isArray(row.medias)) { row.medias.forEach(media => { const url = media && media.data; if (!url || String(url).startsWith('data:')) return; if (media.type === 'video') videos.push(url); else photos.push(url); }); }
-        if (table === 'messages' && row.photo && !String(row.photo).startsWith('data:')) photos.push(row.photo);
-        return { photos, videos };
-    }
-    async function collectQqSyncQueue() {
-        if (!(await requireAdmin())) return [];
-        const batchId = 'qzone_' + new Date().toISOString().replace(/[-:.TZ]/g, '').slice(0, 14);
-        const configs = [
-            { table: 'feeds', cols: 'id,description,medias,author,author_name,created_at,visibility,qzone_sync_status,qzone_synced_at,qzone_sync_batch_id' },
-            { table: 'messages', cols: 'id,content,photo,author,author_name,created_at,visibility,qzone_sync_status,qzone_synced_at,qzone_sync_batch_id' },
-            { table: 'loves', cols: 'id,content,privacy,author,author_name,created_at,visibility,qzone_sync_status,qzone_synced_at,qzone_sync_batch_id' },
-            { table: 'memories', cols: 'id,content,author,author_name,created_at,visibility,qzone_sync_status,qzone_synced_at,qzone_sync_batch_id' }
-        ];
-        let items = [];
-        for (let config of configs) {
-            const { data, error } = await sb.from(config.table).select(config.cols).order('created_at', { ascending: false }).limit(ADMIN_LIMIT);
-            if (error) throw new Error(`${getQqSourceLabel(config.table)} 读取失败：${error.message}`);
-            (data || []).forEach(row => {
-                if (normalizeVisibility(row.visibility) !== 'public') return;
-                if ((row.qzone_sync_status || 'pending') === 'synced') return;
-                if (config.table === 'loves' && row.privacy === 'private') return;
-                items.push(buildQqSyncItem(config.table, row, batchId));
-            });
-        }
-        return items;
-    }
-    function buildQqSyncItem(type, row, batchId) {
-        const media = extractQqMediaItems(type, row);
-        const sourceType = getQqSourceLabel(type);
-        const text = type === 'feeds' ? (row.description || '') : (row.content || '');
-        const item = {
-            sync_id: `${type}_${row.id}`, source_table: type, source_type: sourceType, source_id: String(row.id),
-            author: row.author || '', author_name: getAuthorDisplayName(row), created_at: row.created_at || '',
-            created_at_text: formatDateTimeText(row.created_at), visibility: normalizeVisibility(row.visibility),
-            title: `${sourceType}备份`, text, photos: media.photos, videos: media.videos,
-            sync_target: 'qzone', sync_status: row.qzone_sync_status || 'pending', qzone_sync_batch_id: batchId
-        };
-        item.qq_publish_text = formatQqPublishText(item);
-        return item;
-    }
-    function formatQqPublishText(item) {
-        const body = (item.text || '').trim() || `[${item.source_type}]`;
-        return `${body}\n\n—— 自动备份至QQ空间\n来源：我们的专属小站\n发布者：${item.author_name || item.author || '未知'}\n原发布时间：${item.created_at_text || item.created_at || '未知'}\n分类：${item.source_type}`;
-    }
-    async function exportQqSyncQueue() {
+    async function loadNotifyConfigIntoForm() {
         try {
-            const items = await collectQqSyncQueue();
-            const payload = { exported_at: new Date().toISOString(), exported_by: currentUser, sync_target: 'qzone', note: '自动备份至QQ空间。只包含公开且尚未同步的内容。', items };
-            downloadTextFile('待同步内容.json', JSON.stringify(payload, null, 2), 'application/json;charset=utf-8');
-            alert(items.length ? `已导出 ${items.length} 条待同步内容。下一步双击“启动QQ空间同步.bat”。` : '没有新的公开内容需要同步。');
-        } catch (e) { alert('导出失败：请先运行 docs/supabase-qzone-sync.sql，或检查网络连接。错误：' + e.message); }
+            const cfg = await accountApi('getNotifyConfig');
+            const ejs = cfg.emailjs || {};
+            if (document.getElementById('notifyPublicKey')) document.getElementById('notifyPublicKey').value = ejs.publicKey || '';
+            if (document.getElementById('notifyServiceId')) document.getElementById('notifyServiceId').value = ejs.serviceId || '';
+            if (document.getElementById('notifyTemplateId')) document.getElementById('notifyTemplateId').value = ejs.templateId || '';
+        } catch (e) { console.warn('读取通知配置失败:', e); }
     }
-    async function exportQqSyncPreview() {
+    async function saveNotifyConfig() {
+        const publicKey = document.getElementById('notifyPublicKey').value.trim();
+        const serviceId = document.getElementById('notifyServiceId').value.trim();
+        const templateId = document.getElementById('notifyTemplateId').value.trim();
         try {
-            const items = await collectQqSyncQueue();
-            const preview = items.map((item, idx) => { const mediaText = [`照片：${item.photos.length}张`, `视频：${item.videos.length}个`].join('，'); return `#${idx + 1} ${item.source_type} / ${item.author_name} / ${item.created_at_text}\n${mediaText}\n${item.qq_publish_text}`; }).join('\n\n------------------------------\n\n') || '没有新的公开内容需要同步。';
-            downloadTextFile('QQ空间发布预览.txt', preview, 'text/plain;charset=utf-8');
-            alert('已生成 QQ空间发布预览.txt，可以先检查每条将要发布的文字。');
-        } catch (e) { alert('生成预览失败：' + e.message); }
+            await accountApi('setNotifyConfig', { publicKey, serviceId, templateId });
+            toast('✅ 邮箱通知配置已保存', 'success');
+        } catch (e) { toast('❌ 保存失败：' + e.message, 'error'); }
     }
-    function readJsonFile(file) {
-        return new Promise((resolve, reject) => {
-            if (!file) { reject(new Error('没有选择文件')); return; }
-            const reader = new FileReader();
-            reader.onload = () => { try { resolve(JSON.parse(String(reader.result || ''))); } catch (e) { reject(new Error('发布结果不是有效 JSON 文件')); } };
-            reader.onerror = () => reject(new Error('读取发布结果失败'));
-            reader.readAsText(file, 'utf-8');
-        });
-    }
-    async function importQqSyncResult(file) {
-        if (!(await requireAdmin())) return;
+    async function testNotifyEmail() {
         try {
-            const result = await readJsonFile(file);
-            const items = Array.isArray(result) ? result : (Array.isArray(result.items) ? result.items : []);
-            if (!items.length) { alert('发布结果里没有可导入的记录。'); return; }
-            const allowedTables = new Set(['feeds', 'messages', 'loves', 'memories']);
-            const allowedStatuses = new Set(['pending', 'synced', 'failed', 'skipped']);
-            let ok = 0;
-            for (let item of items) {
-                const table = item.source_table;
-                const status = allowedStatuses.has(item.sync_status) ? item.sync_status : 'failed';
-                if (!allowedTables.has(table) || !item.source_id) continue;
-                const patch = { qzone_sync_status: status, qzone_synced_at: item.synced_at || (status === 'synced' ? new Date().toISOString() : null), qzone_sync_target: item.sync_target || 'qzone', qzone_sync_error: item.error || '', qzone_sync_batch_id: item.qzone_sync_batch_id || item.batch_id || null };
-                const { error } = await sb.from(table).update(patch).eq('id', item.source_id);
-                if (!error) ok++;
-            }
-            logAction('admin_import_qzone_sync_result', { count: ok });
-            alert(`发布结果导入完成：已更新 ${ok} 条。已同步的内容下次不会再导出。`);
-            renderAdminData();
-        } catch (e) { alert('导入发布结果失败：' + e.message); }
+            const result = await accountApi('testNotify', {});
+            toast('✅ 测试邮件已发送到 ' + (result.to || '你的邮箱'), 'success');
+        } catch (e) { toast('❌ 发送失败：' + e.message, 'error'); }
     }
     function renderAdminSectionShell() {
         const sections = [

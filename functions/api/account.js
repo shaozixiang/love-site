@@ -47,6 +47,10 @@ async function handleAction(config, body) {
   if (action === 'updateAvatar') return updateAvatar(config, session.username, body.avatar);
   if (action === 'updateActivity') return updateActivity(config, session.username);
   if (action === 'onlineStatus') return onlineStatus(config, session.username);
+  if (action === 'setMyEmail') return setMyEmail(config, session.username, body.email);
+  if (action === 'getNotifyConfig') return getNotifyConfig(config, session.username);
+  if (action === 'setNotifyConfig') return requireAdminThen(config, session.username, () => setNotifyConfig(config, session.username, body));
+  if (action === 'testNotify') return requireAdminThen(config, session.username, () => testNotify(config, session.username, body));
   if (action === 'logout') return logout(config, session.username);
 
   throw httpError(400, 'Unknown account action.');
@@ -126,6 +130,8 @@ async function setUserPermission(config, usernameInput, permissionInput) {
 async function setUserPassword(config, usernameInput, newPassword) {
   const username = cleanUsername(usernameInput);
   if (!username) throw httpError(400, '用户不存在');
+  // 安全：任何管理员都不能重置超级管理员 admin 的密码（admin 只能通过“修改密码”并输入原密码自己改）
+  if (username === 'admin') throw httpError(400, '不能修改超级管理员的密码');
   const user = await fetchUser(config, username, PUBLIC_USER_COLUMNS);
   if (!user) throw httpError(404, '用户不存在');
   assertPassword(String(newPassword || ''));
@@ -153,10 +159,88 @@ async function updateActivity(config, username) {
 }
 
 async function onlineStatus(config, username) {
-  if (username === 'admin') return { user: null };
+  // admin 登录时也能看到对方的在线状态（返回 boy/girl 中存在的账号）
+  if (username === 'admin') {
+    for (const t of ['girl', 'boy']) {
+      const u = await fetchUser(config, t, PUBLIC_USER_COLUMNS);
+      if (u) return { user: sanitizeUser(u) };
+    }
+    return { user: null };
+  }
   const target = username === 'boy' ? 'girl' : (username === 'girl' ? 'boy' : '');
   if (!target) return { user: null };
   return { user: sanitizeUser(await fetchUser(config, target, PUBLIC_USER_COLUMNS)) };
+}
+
+// ---------- 邮箱通知 ----------
+
+async function getSiteValues(config) {
+  const rows = await supabase(config, '/site_config?select=key,value&limit=1000', { method: 'GET' });
+  const m = {};
+  for (const r of (rows || [])) m[r.key] = r.value || '';
+  return m;
+}
+
+async function setSiteValue(config, key, value) {
+  await supabase(config, '/site_config', { method: 'POST', body: { key, value }, prefer: 'resolution=merge-duplicates' });
+}
+
+async function setMyEmail(config, username, email) {
+  const value = String(email || '').trim();
+  if (value && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)) throw httpError(400, '邮箱格式不正确');
+  await setSiteValue(config, `email_${username}`, value);
+  return { ok: true, email: value };
+}
+
+async function getNotifyConfig(config, username) {
+  let m;
+  try { m = await getSiteValues(config); }
+  catch (e) { throw httpError(400, '通知配置表未初始化：请先在 Supabase SQL Editor 运行 site_config 建表 SQL（见管理后台提示）'); }
+  const emails = {};
+  for (const [k, v] of Object.entries(m)) if (k.startsWith('email_') && v) emails[k.slice(6)] = v;
+  return {
+    emailjs: {
+      publicKey: m.emailjs_public_key || '',
+      serviceId: m.emailjs_service_id || '',
+      templateId: m.emailjs_template_id || ''
+    },
+    emails
+  };
+}
+
+async function setNotifyConfig(config, username, body) {
+  const keys = { publicKey: 'emailjs_public_key', serviceId: 'emailjs_service_id', templateId: 'emailjs_template_id' };
+  for (const [k, kv] of Object.entries(keys)) {
+    await setSiteValue(config, kv, String(body[k] || ''));
+  }
+  return { ok: true };
+}
+
+async function testNotify(config, username, body) {
+  let m;
+  try { m = await getSiteValues(config); }
+  catch (e) { throw httpError(400, '通知配置表未初始化：请先执行 site_config 建表 SQL'); }
+  const publicKey = m.emailjs_public_key, serviceId = m.emailjs_service_id, templateId = m.emailjs_template_id;
+  if (!publicKey || !serviceId || !templateId) throw httpError(400, '请先填写完整的 EmailJS 配置（公钥 / 服务ID / 模板ID）');
+  const to = String(body.to || '').trim() || m[`email_${username}`] || '';
+  if (!to) throw httpError(400, '请填写收件邮箱（当前账号也未绑定邮箱）');
+  const resp = await fetch('https://api.emailjs.com/api/v1.0/email/send', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      service_id: serviceId,
+      template_id: templateId,
+      user_id: publicKey,
+      template_params: {
+        to_email: to,
+        from_name: '我们的专属小站',
+        message: '✅ 这是一封来自情侣小站的测试通知邮件，说明邮箱通知配置成功！'
+      }
+    })
+  });
+  const text = await resp.text();
+  if (!resp.ok) throw httpError(502, '发送失败：' + (text || ('HTTP ' + resp.status)));
+  return { ok: true, to };
 }
 
 async function logout(config, username) {
