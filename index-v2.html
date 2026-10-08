@@ -617,9 +617,23 @@ body {
     var syncTimer = null, onlineStatusTimer = null, heartbeatInterval = null, lastActivityWrite = 0;
     var sectionLoadedAt = {}, failedSections = {};
     var sb = null;
+    // 安全：所有数据库请求经服务端代理 /api/db 中转（未登录一律拒绝，封死匿名裸读）
+    function dbProxyFetch(input, init) {
+        var url = typeof input === 'string' ? new URL(input, window.location.origin) : new URL(input.url);
+        if (url.pathname.indexOf('/rest/v1/') >= 0) {
+            var headers = new Headers(init ? init.headers : undefined);
+            headers.set('X-Couple-Token', getSessionToken() || '');
+            return fetch('/api/db' + url.pathname + url.search, {
+                method: init ? init.method : 'GET',
+                headers: headers,
+                body: init && init.body ? init.body : undefined
+            });
+        }
+        return fetch(input, init);
+    }
     function initSupabase() {
         if (sb || !window.supabase) return false;
-        try { sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY); return true; } catch (e) { console.error('Supabase 初始化失败（网络或 CDN 问题），界面仍可打开：', e); return false; }
+        try { sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, { global: { fetch: dbProxyFetch } }); return true; } catch (e) { console.error('Supabase 初始化失败（网络或 CDN 问题），界面仍可打开：', e); return false; }
     }
     initSupabase();
     // 保险：若库因任何原因延迟就绪，轮询补初始化（内联后通常立即成功）
@@ -1169,7 +1183,6 @@ body {
             const { error: updateError } = await sb.from('feeds').update({ likes: currentLikes }).eq('id', feedId);
             if (updateError) throw updateError;
             renderFeeds({ force: true });
-            if (!hasLiked) notifyEvent('like', feedId);
         } catch (e) { console.error('点赞失败:', e); alert('点赞失败：' + (e.message || '未知错误')); }
     }
 
@@ -1301,7 +1314,6 @@ body {
             const { error: updateError } = await sb.from('messages').update({ likes: currentLikes }).eq('id', msgId);
             if (updateError) throw updateError;
             renderMessages({ force: true });
-            if (!hasLiked) notifyEvent('like', msgId);
         } catch (e) { console.error('点赞失败:', e); alert('点赞失败：' + (e.message || '未知错误')); }
     }
 
