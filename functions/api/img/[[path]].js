@@ -26,6 +26,7 @@ export async function onRequest(context) {
     const url = new URL(request.url);
     let rel = decodeURIComponent(url.pathname.replace(/^\/api\/img\/?/, ''));
     if (!rel) return jsonResponse({ error: '缺少文件路径' }, 400);
+    if (rel.charAt(0) !== '/') rel = '/' + rel;
     if (!ALLOWED_PREFIXES.some(p => rel.startsWith(p))) {
       return jsonResponse({ error: '该路径不允许访问' }, 403);
     }
