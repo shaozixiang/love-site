@@ -253,7 +253,326 @@ body {
 .avatar-xs { width:20px; height:20px; border-radius:50%; object-fit:cover; vertical-align:-4px; margin-right:4px; border:1px solid #ffd8e0; }
 .feed-avatar .avatar-xs { width:38px; height:38px; vertical-align:middle; margin-right:0; }
     </style>
-<script>    /* ============================================================
+<body>
+    <!-- 解锁门 -->
+    <div class="bubble-layer" id="bubbleLayer">
+        <div class="bubble-tip">💖 点击10个爱心气泡，解锁我们的小站~</div>
+        <div class="bubble-count">已点击：<span id="bubbleCount">0</span> / 10</div>
+        <div class="gate-badge">💖 我们的专属小站 · 专属优化版</div>
+    </div>
+
+    <!-- 登录页 -->
+    <div class="login-container" id="loginPage">
+        <div class="login-box">
+            <h2>💖 欢迎来到我们的小站 💖</h2>
+            <div class="login-sub">登录后查看我们的小世界</div>
+            <input type="text" class="login-input" id="username" placeholder="账号">
+            <input type="password" class="login-input" id="password" placeholder="密码">
+            <button class="login-btn" id="loginBtn" onclick="login()">登录</button>
+            <div class="login-version">💖 专属优化版 · 更快更流畅</div>
+        </div>
+    </div>
+
+    <!-- 主界面 -->
+    <div class="main-container" id="mainPage">
+        <!-- 顶部 Hero -->
+        <div class="hero">
+            <div class="hero-badge">💖 专属优化版</div>
+            <div class="hero-title">💖 我们的专属小站 💖</div>
+            <div class="hero-days" id="togetherDaysDisplay"></div>
+        </div>
+
+        <!-- 用户信息条 -->
+        <div class="user-bar">
+            <div class="avatar-wrap" onclick="openAvatarModal()">
+                <img id="userAvatarImg" class="avatar-img" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%23ff6b81'%3E%3Cpath d='M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z'/%3E%3C/svg%3E">
+                <div class="avatar-edit">✎</div>
+            </div>
+            <div>
+                <div class="user-name" id="displayUsername"></div>
+                <div class="online-status" id="onlineStatus"></div>
+            </div>
+            <div class="user-tools">
+                <div class="settings-dropdown" style="position:relative;">
+                    <button class="gear-btn" onclick="toggleDropdown()">⚙️ ▼</button>
+                    <div class="dropdown-menu" id="dropdownMenu">
+                        <button onclick="openEmailModal()">📧 我的邮箱</button>
+                        <button onclick="openPasswordModal()">修改密码</button>
+                        <button onclick="openAdminPanel()" id="adminEntryBtn" style="display:none;">🔧 管理后台</button>
+                        <button class="danger" onclick="logout()">退出登录</button>
+                    </div>
+                </div>
+                <button class="bubble-fab" id="openBubbleSettingsBtn">🎈</button>
+            </div>
+        </div>
+
+        <!-- 导航 -->
+        <nav class="tab-nav">
+            <button class="tab-btn active" data-section="message">💬 留言</button>
+            <button class="tab-btn" data-section="gallery">📸 相册</button>
+            <button class="tab-btn" data-section="memory">✨ 回忆</button>
+            <button class="tab-btn" data-section="love">💌 感动</button>
+            <button class="tab-btn" data-section="memo">📋 待办</button>
+            <button class="tab-btn" data-section="todo">📝 行程</button>
+            <button class="tab-btn" data-section="angry">😠 生气</button>
+            <button class="tab-btn" data-section="travel">🗺️ 地图</button>
+        </nav>
+
+        <!-- 留言板 -->
+        <div class="section active" id="messageSection">
+            <div class="card">
+                <div class="section-title">💬 给TA的悄悄话</div>
+                <textarea class="common-textarea" id="messageInput" placeholder="想对TA说什么..."></textarea>
+                <div style="display:flex; align-items:center; gap:10px; margin-bottom:12px;">
+                    <input type="file" id="messagePhotoInput" accept="image/*" style="flex:1; font-size:12px;">
+                    <div id="messagePhotoPreview"></div>
+                </div>
+                <button class="submit-btn" id="msgSubmitBtn" onclick="addMessageWithPhoto()" style="width:100%;">发送留言</button>
+            </div>
+            <div id="messageList"></div>
+        </div>
+
+        <!-- 时光相册 -->
+        <div class="section" id="gallerySection">
+            <div class="card">
+                <div class="section-title">📸 时光相册 · 朋友圈模式</div>
+                <div class="upload-zone" onclick="document.getElementById('fileInput').click()" style="border:2px dashed #ffb7c5; border-radius:16px; padding:20px; text-align:center; cursor:pointer; margin-bottom:12px; color:#d6336c; font-weight:600;">
+                    📷 点击选择照片/视频（可多选）
+                    <input type="file" id="fileInput" accept="image/*,video/*" multiple style="display:none">
+                </div>
+                <div id="selectedFilesPreview" class="preview-images" style="display:flex; flex-wrap:wrap; gap:10px; margin-bottom:12px;"></div>
+                <textarea id="feedDesc" class="common-textarea" placeholder="写一段描述... (选填)"></textarea>
+                <button class="submit-btn" id="feedSubmitBtn" onclick="uploadFeed()" style="width:100%;">📤 发送动态</button>
+            </div>
+            <div id="galleryContainer"></div>
+        </div>
+
+        <!-- 一起做过的事 -->
+        <div class="section" id="memorySection">
+            <div class="card">
+                <div class="section-title">✨ 我们一起做过的事</div>
+                <div style="display:flex; gap:8px;">
+                    <input class="common-input" id="memoryInput" placeholder="添加我们一起做过的事..." style="margin-bottom:0;">
+                    <button class="submit-btn" onclick="addMemory()">添加</button>
+                </div>
+            </div>
+            <div id="memoryList"></div>
+        </div>
+
+        <!-- 感动的话 -->
+        <div class="section" id="loveSection">
+            <div class="card">
+                <div class="section-title">💌 那些让我感动的话</div>
+                <textarea class="common-textarea" id="loveInput" placeholder="写下TA让你感动的话..."></textarea>
+                <div class="radio-group" style="display:flex; gap:16px; margin-bottom:12px; font-size:14px;">
+                    <label><input type="radio" name="lovePrivacy" value="public" checked> 🌍 公开</label>
+                    <label><input type="radio" name="lovePrivacy" value="private"> 🔒 私密</label>
+                </div>
+                <button class="submit-btn" onclick="addLove()" style="width:100%;">保存</button>
+            </div>
+            <div id="loveList"></div>
+        </div>
+
+        <!-- 待办备忘录 -->
+        <div class="section" id="memoSection">
+            <div class="card">
+                <div class="section-title">📋 待办备忘录</div>
+                <div style="display:flex; gap:8px; margin-bottom:12px;">
+                    <input type="text" id="memoInput" placeholder="添加待办事项..." style="flex:1; padding:12px; border:2px solid #ffd8e0; border-radius:14px; font-size:14px;">
+                    <select id="memoPriority" style="padding:10px; border:2px solid #ffd8e0; border-radius:14px; font-size:13px;">
+                        <option value="normal">普通</option>
+                        <option value="important">重要</option>
+                        <option value="urgent">紧急</option>
+                    </select>
+                    <button class="submit-btn" onclick="addMemo()">添加</button>
+                </div>
+            </div>
+            <div id="memoList"></div>
+        </div>
+
+        <!-- 行程/纪念日 -->
+        <div class="section" id="todoSection">
+            <div class="card">
+                <div class="section-title">📅 行程模块</div>
+                <div style="display:flex; gap:8px; margin-bottom:10px; flex-wrap:wrap;">
+                    <input type="date" id="scheduleStart" style="flex:1; min-width:120px; padding:10px; border:2px solid #ffd8e0; border-radius:14px; font-size:13px;">
+                    <input type="date" id="scheduleEnd" style="flex:1; min-width:120px; padding:10px; border:2px solid #ffd8e0; border-radius:14px; font-size:13px;">
+                </div>
+                <div style="display:flex; gap:8px; margin-bottom:10px;">
+                    <input type="text" id="scheduleTitle" placeholder="行程标题" style="flex:1; padding:12px; border:2px solid #ffd8e0; border-radius:14px; font-size:14px;">
+                    <button class="submit-btn" onclick="addSchedule()">添加</button>
+                </div>
+            </div>
+            <div id="scheduleList"></div>
+            <div class="card">
+                <div class="section-title">🎂 纪念日倒计时</div>
+                <div style="display:flex; gap:8px; flex-wrap:wrap;">
+                    <input type="text" id="countdownName" placeholder="纪念日名称" style="flex:1; min-width:130px; padding:12px; border:2px solid #ffd8e0; border-radius:14px; font-size:14px;">
+                    <input type="date" id="countdownDate" style="padding:10px; border:2px solid #ffd8e0; border-radius:14px; font-size:13px;">
+                    <button class="submit-btn" onclick="addCountdown()">添加</button>
+                </div>
+            </div>
+            <div id="countdownList"></div>
+        </div>
+
+        <!-- 生气模式 -->
+        <div class="section" id="angrySection">
+            <div class="card">
+                <div class="section-title">😠 生气模式</div>
+                <div id="angryStatus" style="padding:14px; background:#fff5f8; border-radius:14px; margin-bottom:12px; font-weight:600; color:#5a4650;">当前状态：没有生气，开开心心~</div>
+                <button class="submit-btn" onclick="toggleAngryMode()" id="angryBtn" style="width:100%;">启用生气模式</button>
+            </div>
+            <div id="apologyList"></div>
+        </div>
+
+        <!-- 旅行地图 -->
+        <div class="section" id="travelSection">
+            <div class="card" style="padding:10px;">
+                <div id="map" class="map-container"></div>
+            </div>
+            <div style="display:flex; gap:8px; margin-bottom:12px;">
+                <input type="text" id="markerName" placeholder="地点名称" style="flex:1; padding:12px; border:2px solid #ffd8e0; border-radius:14px; font-size:14px;">
+                <button class="submit-btn" onclick="addMarkerFromInput()">添加标记</button>
+            </div>
+            <div id="markerList" class="map-marker-list"></div>
+        </div>
+
+        <div class="footer-tag">💖 我们的专属小站 · 专属优化版</div>
+    </div>
+
+    <!-- 生气遮罩 -->
+    <div class="angry-mask" id="angryMask">
+        <div class="angry-box">
+            <h3 style="color:#d6336c;">😠 TA正在生气</h3>
+            <p style="margin:10px 0; color:#666; font-size:14px;">快去写封道歉信哄哄TA吧~</p>
+            <textarea class="angry-textarea" id="apologyInput" placeholder="写道歉信..."></textarea>
+            <button class="submit-btn" onclick="submitApology()" style="width:100%;">提交道歉</button>
+            <button class="submit-btn ghost" style="margin-top:10px; width:100%;" onclick="closeAngryMask(true)">暂不道歉，先逛逛</button>
+        </div>
+    </div>
+
+    <!-- 图片查看 -->
+    <div class="image-modal" id="imageModal" onclick="closeModal()">
+        <span class="close-x" onclick="closeModal()">&times;</span>
+        <button class="nav-arrow left" onclick="prevPhoto(event)">&lt;</button>
+        <div class="modal-content" onclick="event.stopPropagation()">
+            <img id="modalImage" src="">
+            <button class="download-btn" id="downloadImageBtn">📥 下载</button>
+        </div>
+        <button class="nav-arrow right" onclick="nextPhoto(event)">&gt;</button>
+    </div>
+
+    <!-- 视频查看 -->
+    <div class="video-modal" id="videoModal">
+        <div class="modal-content">
+            <span class="close-x" onclick="closeVideoModal()">&times;</span>
+            <video id="modalVideo" controls style="max-width:92vw; max-height:82vh; border-radius:18px;"></video>
+        </div>
+    </div>
+
+    <!-- 头像修改 -->
+    <div id="avatarModal" class="modal-overlay">
+        <div class="modal-card">
+            <span class="close-modal" onclick="closeModalById('avatarModal')">&times;</span>
+            <h3>📸 修改头像</h3>
+            <input type="file" id="avatarInput" accept="image/*">
+            <button class="submit-btn" onclick="updateAvatar()" style="width:100%;">保存头像</button>
+        </div>
+    </div>
+
+    <!-- 修改密码 -->
+    <div id="passwordModal" class="modal-overlay">
+        <div class="modal-card">
+            <span class="close-modal" onclick="closeModalById('passwordModal')">&times;</span>
+            <h3>🔐 修改密码</h3>
+            <input type="password" id="oldPwd" placeholder="原密码">
+            <input type="password" id="newPwd" placeholder="新密码">
+            <input type="password" id="confirmPwd" placeholder="确认新密码">
+            <button class="submit-btn" onclick="changePassword()" style="width:100%;">确认修改</button>
+        </div>
+    </div>
+
+    <!-- 我的邮箱 -->
+    <div id="emailModal" class="modal-overlay">
+        <div class="modal-card">
+            <span class="close-modal" onclick="closeModalById('emailModal')">&times;</span>
+            <h3>📧 我的邮箱</h3>
+            <input type="email" id="myEmailInput" placeholder="填你的 QQ 邮箱，对方更新时通知你">
+            <div style="font-size:12px;color:#888;margin-bottom:10px;">填了邮箱后，对方在网站发动态 / 留言 / 点赞时，你会收到邮件通知。留空则不接收通知。</div>
+            <button class="submit-btn" onclick="saveMyEmail()" style="width:100%;">保存邮箱</button>
+        </div>
+    </div>
+
+    <!-- 注册 -->
+    <div id="registerModal" class="modal-overlay">
+        <div class="modal-card">
+            <span class="close-modal" onclick="closeModalById('registerModal')">&times;</span>
+            <h3>📝 注册新账号</h3>
+            <input type="text" id="newUsername" placeholder="账号 (boy/girl风格)">
+            <input type="password" id="newUserPwd" placeholder="密码">
+            <button class="submit-btn" onclick="registerNewUser()" style="width:100%;">注册</button>
+        </div>
+    </div>
+
+    <!-- 设置账号密码 -->
+    <div id="setUserPasswordModal" class="modal-overlay">
+        <div class="modal-card">
+            <span class="close-modal" onclick="closeModalById('setUserPasswordModal')">&times;</span>
+            <h3>🔐 设置账号密码</h3>
+            <input type="text" id="setPwdUsername" placeholder="账号" readonly>
+            <input type="password" id="setPwdNew" placeholder="新密码">
+            <input type="password" id="setPwdConfirm" placeholder="确认新密码">
+            <button class="submit-btn" onclick="setUserPassword()" style="width:100%;">保存新密码</button>
+        </div>
+    </div>
+
+    <!-- 气泡设置 -->
+    <div class="bubble-settings-modal" id="bubbleSettingsModal">
+        <div class="bubble-settings-card">
+            <h3 style="color:#d6336c; margin-bottom:12px;">🎈 梦幻背景气泡</h3>
+            <div style="display:flex; justify-content:space-between; align-items:center; margin:10px 0;">
+                <span style="font-weight:600;">✨ 开启气泡</span>
+                <div class="toggle-switch" id="bubbleToggle"></div>
+            </div>
+            <div style="display:flex; justify-content:space-between; align-items:center; margin:10px 0;">
+                <span style="font-weight:600;">⏱️ 间隔(秒)</span>
+                <input type="number" id="bubbleInterval" min="6" max="25" value="12" class="interval-input">
+            </div>
+            <div style="font-weight:700; margin:12px 0 6px;">📸 共享照片池</div>
+            <div style="margin:10px 0; padding:14px; border:1.5px dashed #ffb7c5; border-radius:16px; text-align:center; cursor:pointer; color:#d6336c;" onclick="document.getElementById('bubblePhotoInput').click()">
+                ➕ 添加照片
+                <input type="file" id="bubblePhotoInput" accept="image/*" multiple style="display:none">
+            </div>
+            <div class="photo-list-preview" id="bubblePhotoList"></div>
+            <button class="submit-btn" style="width:100%; margin-top:8px;" onclick="saveBubbleSettings()">保存</button>
+            <button class="submit-btn ghost" style="width:100%; margin-top:8px;" onclick="closeBubbleSettings()">关闭</button>
+        </div>
+    </div>
+
+    <!-- 管理后台 -->
+    <div id="adminPanel" class="admin-panel">
+        <div class="admin-container">
+            <div class="admin-title">
+                <h2>🔧 情侣小站 · 后台管理</h2>
+                <div>
+                    <button class="admin-btn success" onclick="showRegisterModal()">➕ 注册新账号</button>
+                    <button class="admin-btn" onclick="closeAdminPanel()">关闭后台</button>
+                </div>
+            </div>
+            <div class="mode-selector">
+                <label>📦 相册存储模式：</label>
+                <select id="adminStorageModeSelect" onchange="adminSetStorageMode()">
+                    <option value="cloud">☁️ 图床模式（无限容量）</option>
+                    <option value="local">💾 本地存储（测试用）</option>
+                </select>
+            </div>
+            <div id="adminContent"></div>
+        </div>
+    </div>
+
+    <!-- Toast 轻提示 -->
+    <div id="toastBox"></div>
+    <script>    /* ============================================================
      * 💖 我们的专属小站（专属优化版）
      * - 界面全新设计（移动端优先、浪漫精致风）
      * - 图片默认直接显示（朋友圈九宫格 / 留言直显），不再点“查看图片”
