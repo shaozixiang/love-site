@@ -572,8 +572,7 @@ body {
 
     <!-- Toast 轻提示 -->
     <div id="toastBox"></div>
-    <script>
-    /* ============================================================
+    <script>    /* ============================================================
      * 💖 我们的专属小站（专属优化版）
      * - 界面全新设计（移动端优先、浪漫精致风）
      * - 图片默认直接显示（朋友圈九宫格 / 留言直显），不再点“查看图片”
@@ -644,6 +643,18 @@ body {
     function escapeHtml(str) { return String(str || '').replace(/[&<>]/g, m => m === '&' ? '&amp;' : m === '<' ? '&lt;' : '&gt;'); }
     // 媒体 CDN 容错：jsDelivr 主域名不通时自动换备用节点重试
     var IMG_CDNS = ['https://cdn.jsdelivr.net', 'https://fastly.jsdelivr.net', 'https://gcore.jsdelivr.net', 'https://testingcf.jsdelivr.net'];
+    // 私有化：图片仓库转私有后，所有媒体统一改走 /api/img 代理（登录才能看，边缘缓存加速）
+    function imgProxy(url) {
+        var s = String(url || '');
+        if (!s || s.indexOf('/api/img/') === 0) return s;
+        var m = s.match(/^https:\/\/[^/]+\.jsdelivr\.net\/gh\/[^/@]+\/[^/@]+@[^/]+\/(.+)$/i);
+        if (m) return '/api/img/' + m[1];
+        var m2 = s.match(/^https:\/\/raw\.githubusercontent\.com\/[^/]+\/[^/]+\/[^/]+\/(.+)$/i);
+        if (m2) return '/api/img/' + m2[1];
+        var m3 = s.match(/^https:\/\/github\.com\/[^/]+\/[^/]+\/blob\/[^/]+\/(.+)$/i);
+        if (m3) return '/api/img/' + m3[1];
+        return s; // 本地 blob / 其他 → 原样
+    }
     function bestImgSrc(url, n) {
         var m = String(url).match(/^https:\/\/[^/]+/);
         if (!m) return url;
@@ -733,7 +744,7 @@ body {
     // 头像辅助：有头像图用图；无头像时若显示名已带 emoji 则不重复加
     function authorAvatarHtml(author, displayName) {
         const u = (window.__usersCache || {})[author];
-        if (u && u.avatar) return `<img class="avatar-xs" src="${u.avatar}" alt="">`;
+        if (u && u.avatar) return `<img class="avatar-xs" src="${imgProxy(u.avatar)}" alt="">`;
         if (displayName && /^[👦👧😍🤗💖❤️]/.test(displayName)) return '';
         return author === 'girl' ? '👧' : '👦';
     }
@@ -904,8 +915,8 @@ body {
 
     // ---------- 账号接口与权限 ----------
     function getSessionToken() { return localStorage.getItem('couple_session_token') || ''; }
-    function setSession(u, t) { localStorage.setItem('couple_logged_user', u); localStorage.setItem('couple_session_token', t); }
-    function clearSession() { localStorage.removeItem('couple_logged_user'); localStorage.removeItem('couple_session_token'); }
+    function setSession(u, t) { localStorage.setItem('couple_logged_user', u); localStorage.setItem('couple_session_token', t); try { document.cookie = 'couple_t=' + encodeURIComponent(t) + '; path=/; max-age=2592000; samesite=lax' + (location.protocol === 'https:' ? '; secure' : ''); } catch (e) {} }
+    function clearSession() { localStorage.removeItem('couple_logged_user'); localStorage.removeItem('couple_session_token'); try { document.cookie = 'couple_t=; path=/; max-age=0; samesite=lax'; } catch (e) {} }
     async function accountApi(action, payload = {}) {
         if (window.location.protocol === 'file:') throw new Error('账号安全接口只在部署后可用。');
         const controller = new AbortController();
@@ -1092,9 +1103,9 @@ body {
                     if (!url) return '';
                     const single = md.length === 1 ? ' single' : '';
                     if (media.type === 'video') {
-                        return `<div class="grid-cell${single} video-cell" onclick="openVideoModal('${url}')"><video src="${url}" preload="metadata" muted playsinline webkit-playsinline loading="lazy" referrerpolicy="no-referrer" onerror="tryFallback(this)"></video><span class="play-badge"></span></div>`;
+                        return `<div class="grid-cell${single} video-cell" onclick="openVideoModal('${imgProxy(url)}')"><video src="${imgProxy(url)}" preload="metadata" muted playsinline webkit-playsinline loading="lazy" referrerpolicy="no-referrer" onerror="tryFallback(this)"></video><span class="play-badge"></span></div>`;
                     }
-                    return `<div class="grid-cell${single}" onclick="openImageModal('${url}')"><img src="${url}" loading="lazy" decoding="async" referrerpolicy="no-referrer" onerror="tryFallback(this)"></div>`;
+                    return `<div class="grid-cell${single}" onclick="openImageModal('${imgProxy(url)}')"><img src="${imgProxy(url)}" loading="lazy" decoding="async" referrerpolicy="no-referrer" onerror="tryFallback(this)"></div>`;
                 }).join('');
                 mediaHtml = `<div class="feed-grid">${cells}</div>`;
             }
@@ -1229,7 +1240,7 @@ body {
         let html = msgs.map(m => {
             const canDelete = isAdmin || m.author === currentUser;
             // 留言图片直接显示（无“查看图片”按钮）
-            const photoHtml = m.photo ? `<img class="msg-photo" src="${m.photo}" loading="lazy" decoding="async" referrerpolicy="no-referrer" onerror="tryFallback(this)" onclick="openImageModal('${m.photo}')">` : '';
+            const photoHtml = m.photo ? `<img class="msg-photo" src="${imgProxy(m.photo)}" loading="lazy" decoding="async" referrerpolicy="no-referrer" onerror="tryFallback(this)" onclick="openImageModal('${imgProxy(m.photo)}')">` : '';
             let commentsHtml = `<div class="feed-comments" style="margin-top:10px; border-top:1px solid #fdf0f3; padding-top:10px;">`;
             if (m.comments && m.comments.length) {
                 for (let ci = 0; ci < m.comments.length; ci++) {
@@ -1635,7 +1646,7 @@ body {
         floatPhotos.forEach((p, idx) => {
             const d = document.createElement('div');
             d.className = 'preview-item';
-            d.innerHTML = `<img src="${p.dataUrl}" loading="lazy" decoding="async" referrerpolicy="no-referrer"><span class="remove-photo" data-idx="${idx}">✖</span>`;
+            d.innerHTML = `<img src="${imgProxy(p.dataUrl)}" loading="lazy" decoding="async" referrerpolicy="no-referrer"><span class="remove-photo" data-idx="${idx}">✖</span>`;
             d.querySelector('.remove-photo').onclick = async () => {
                 try { if (p.id) await sb.from('bubble_photos').delete().eq('id', p.id); } catch (e) {}
                 floatPhotos.splice(idx, 1);
@@ -2246,6 +2257,6 @@ body {
             modalEl.addEventListener('touchend', e => { touchEndX = e.changedTouches[0].screenX; handleDisplaySwipe(); }, { passive: true });
         }
     };
-    </script>
+</script>
 </body>
 </html>
