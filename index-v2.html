@@ -2129,6 +2129,8 @@ body {
     async function autoLogin() {
         const savedUser = localStorage.getItem('couple_logged_user');
         if (!savedUser || !getSessionToken()) return false;
+        // 补写图片代理 cookie：自动登录恢复会话时，<img> 请求靠 cookie 鉴权
+        try { document.cookie = 'couple_t=' + encodeURIComponent(getSessionToken()) + '; path=/; max-age=2592000; samesite=lax' + (location.protocol === 'https:' ? '; secure' : ''); } catch (e) {}
         try {
             const users = await loadUserData({ allowLocalFallback: false });
             if (users[savedUser]) { enterMainSystem(savedUser, users); return true; }
