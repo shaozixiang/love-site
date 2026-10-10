@@ -3157,6 +3157,8 @@
             document.getElementById('bubbleLayer').style.display = 'flex';
             document.getElementById('loginPage').style.display = 'none';
             document.getElementById('mainPage').style.display = 'none';
+            // 打开即检查自动登录/显示登录框（放在最前，避免后续代码报错影响登录入口）
+            unlockEntryGate();
             
             loadStorageModeSetting(); 
             let texts=['宝宝我爱你','我超喜欢你','我们要一直在一起','最爱宝宝啦'];
@@ -3220,7 +3222,6 @@
                 modalEl.addEventListener('touchend', e => { touchEndX = e.changedTouches[0].screenX; handleDisplaySwipe(); }, {passive: true});
             }
         };
-        unlockEntryGate();
     </script>
 </body>
 </html>
