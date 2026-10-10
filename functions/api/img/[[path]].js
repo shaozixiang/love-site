@@ -44,7 +44,7 @@ export async function onRequest(context) {
 
     // 3. 回源 GitHub 私有仓库
     const owner = String(env.GITHUB_IMG_OWNER || '');
-    const repo = String(env.GITHUB_IMG_REPO || env.GITHUB_IMG_REPO1 || '');
+    const repo = String(env.GITHUB_IMG_REPO1 || env.GITHUB_IMG_REPO || '');
     const branch = String(env.GITHUB_IMG_BRANCH || 'main');
     const pat = String(env.GITHUB_IMG_TOKEN || '');
     if (!owner || !repo || !pat) return jsonResponse({ error: '图片服务未配置完整' }, 500);
