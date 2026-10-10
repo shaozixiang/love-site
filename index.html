@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
@@ -457,13 +457,7 @@
         .toggle-switch::after { content: ""; width: 20px; height: 20px; background: white; border-radius: 50%; position: absolute; top: 2px; left: 2px; transition: 0.2s; }
         .toggle-switch.active::after { left: 22px; }
         .interval-input { width: 80px; padding: 5px; border-radius: 30px; border: 1px solid #ffb7c5; text-align: center; }
-    
-        #toastBox { position:fixed; top:12%; left:0; width:100%; display:flex; flex-direction:column; align-items:center; gap:8px; z-index:99999; pointer-events:none; }
-        .toast { background:rgba(74,53,64,.88); color:#fff; font-size:13px; padding:9px 18px; border-radius:999px; max-width:82%; text-align:center; box-shadow:0 4px 14px rgba(0,0,0,.18); }
-        .toast.success { background:rgba(46,160,67,.92); }
-        .toast.error { background:rgba(220,60,60,.92); }
-        .toast.hide { opacity:0; transform:translateY(-10px); transition:opacity .3s, transform .3s; }
-</style>
+    </style>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <script src="https://unpkg.com/@supabase/supabase-js@2"></script>
@@ -950,7 +944,7 @@
                     for(let ci = 0; ci < feed.comments.length; ci++) {
                         let c = feed.comments[ci];
                         let canDelComment = isAdmin || c.author === currentUser;
-                        commentsHtml += `<div class="comment-item"><strong>${escapeHtml(c.authorName || c.author)}</strong>: ${escapeHtml(c.content)}<span style="color:#aaa; margin-left:8px;">${c.time}</span>${canDelComment ? `<button class="submit-btn" style="padding:0px 6px;margin-left:8px;font-size:10px;" onclick="deleteComment('${feed.id}',${ci})">删除</button>` : ''}</div>`;
+                        commentsHtml += `<div class="comment-item"><strong>${c.authorName || c.author}</strong>: ${escapeHtml(c.content)}<span style="color:#aaa; margin-left:8px;">${c.time}</span>${canDelComment ? `<button class="submit-btn" style="padding:0px 6px;margin-left:8px;font-size:10px;" onclick="deleteComment('${feed.id}',${ci})">删除</button>` : ''}</div>`;
                     }
                 }
                 commentsHtml += `<div class="reply-input"><input type="text" id="comment_input_${feed.id}" placeholder="写评论..."><button onclick="addFeedComment('${feed.id}', document.getElementById('comment_input_${feed.id}').value);document.getElementById('comment_input_${feed.id}').value=''">评论</button></div></div>`;
@@ -960,7 +954,7 @@
                 let hasLiked = likes.includes(currentUser);
                 let likeCount = likes.length;
                 let likeUsersHtml = likes.map(u => {
-                    let displayName = u === 'boy' ? '👦 boy' : (u === 'girl' ? '👧 girl' : escapeHtml(u));
+                    let displayName = u === 'boy' ? '👦 boy' : (u === 'girl' ? '👧 girl' : u);
                     return `<span class="like-user-tag">${displayName}</span>`;
                 }).join('');
                 let likeHtml = `<div class="like-section">
@@ -974,7 +968,7 @@
                     </div>
                 </div>`;
                 
-                html += `<div class="feed-item"><div class="feed-header"><span class="feed-author">${escapeHtml(feed.authorName)}</span><span class="feed-time">${feed.time}</span>${canDelete ? `<button class="submit-btn" style="padding:2px 8px;" onclick="deleteFeed('${feed.id}')">删除</button>` : ''}</div>${feed.desc ? `<div class="feed-desc">${escapeHtml(feed.desc)}</div>` : ''}${mediaHtml}${likeHtml}${commentsHtml}</div>`;
+                html += `<div class="feed-item"><div class="feed-header"><span class="feed-author">${feed.authorName}</span><span class="feed-time">${feed.time}</span>${canDelete ? `<button class="submit-btn" style="padding:2px 8px;" onclick="deleteFeed('${feed.id}')">删除</button>` : ''}</div>${feed.desc ? `<div class="feed-desc">${escapeHtml(feed.desc)}</div>` : ''}${mediaHtml}${likeHtml}${commentsHtml}</div>`;
             }
             document.getElementById('galleryContainer').innerHTML = html;
         }
@@ -1165,7 +1159,7 @@
                     for(let ci = 0; ci < m.comments.length; ci++) {
                         let c = m.comments[ci];
                         let canDelComment = isAdmin || c.author === currentUser;
-                        commentsHtml += `<div class="comment-item"><strong>${escapeHtml(c.authorName || c.author)}</strong>: ${escapeHtml(c.content)}<span style="color:#aaa; margin-left:8px;">${c.time}</span>${canDelComment ? `<button class="submit-btn" style="padding:0px 6px;margin-left:8px;font-size:10px;" onclick="deleteMsgComment('${m.id}',${ci})">删除</button>` : ''}</div>`;
+                        commentsHtml += `<div class="comment-item"><strong>${c.authorName || c.author}</strong>: ${escapeHtml(c.content)}<span style="color:#aaa; margin-left:8px;">${c.time}</span>${canDelComment ? `<button class="submit-btn" style="padding:0px 6px;margin-left:8px;font-size:10px;" onclick="deleteMsgComment('${m.id}',${ci})">删除</button>` : ''}</div>`;
                     }
                 }
                 commentsHtml += `<div class="reply-input"><input type="text" id="msg_comment_input_${m.id}" placeholder="回复悄悄话..."><button onclick="addMsgComment('${m.id}', document.getElementById('msg_comment_input_${m.id}').value);document.getElementById('msg_comment_input_${m.id}').value=''">回复</button></div></div>`;
@@ -1175,7 +1169,7 @@
                 let msgHasLiked = msgLikes.includes(currentUser);
                 let msgLikeCount = msgLikes.length;
                 let msgLikeUsersHtml = msgLikes.map(u => {
-                    let displayName = u === 'boy' ? '👦 boy' : (u === 'girl' ? '👧 girl' : escapeHtml(u));
+                    let displayName = u === 'boy' ? '👦 boy' : (u === 'girl' ? '👧 girl' : u);
                     return `<span class="like-user-tag">${displayName}</span>`;
                 }).join('');
                 let msgLikeHtml = `<div class="like-section" style="padding:0 15px 10px;">
@@ -2731,7 +2725,7 @@
             closeModalById('registerModal'); 
             if(isAdmin) await renderAdminData(); 
             if (btn) { btn.disabled = false; btn.innerText = '注册'; }
-            showToast(`✅ 账号 ${newName} 注册成功，后台列表已刷新`, 'success'); 
+            alert(`账号 ${newName} 注册成功，已经在后台列表刷新。`); 
         }
         function closeAdminPanel() { 
             document.getElementById('adminPanel').style.display = 'none'; 
@@ -2799,21 +2793,7 @@
             refreshCurrentSection().catch(e => console.log('切换页面刷新出现微调')); 
             if(sectionName === 'travel') setTimeout(() => initMap(), 100); 
         }
-
-        function showToast(msg, type) {
-            var box = document.getElementById('toastBox');
-            if (!box) {
-                box = document.createElement('div'); box.id = 'toastBox';
-                document.body.appendChild(box);
-            }
-            var t = document.createElement('div');
-            t.className = 'toast' + (type === 'success' ? ' success' : type === 'error' ? ' error' : '');
-            t.textContent = msg;
-            box.appendChild(t);
-            setTimeout(function () { t.classList.add('hide'); setTimeout(function () { t.remove(); }, 350); }, 2200);
-        }
-        function escapeHtml(str){
- 
+        function escapeHtml(str){ 
             return String(str||'').replace(/[&<>]/g,function(m){return m==='&'?'&amp;':m==='<'?'&lt;':'&gt;';}); 
         }
         function isCoupleAccount(username = currentUser) {
