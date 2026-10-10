@@ -8,8 +8,8 @@
 
 const ALLOWED_TABLES = new Set([
   'feeds', 'messages', 'loves', 'memories', 'memos', 'schedules', 'countdowns',
-  'travel_markers', 'bubble_config', 'bubble_photos', 'angry_mode',
-  'apologies', 'admin_logs'
+  'travel_markers', 'users', 'bubble_config', 'bubble_photos', 'angry_mode',
+  'apologies', 'admin_logs', 'site_config'
 ]);
 
 export async function onRequest(context) {
