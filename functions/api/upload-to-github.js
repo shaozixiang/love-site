@@ -76,8 +76,10 @@ export async function onRequest(context) {
     }
 
     const cdnUrl = `https://cdn.jsdelivr.net/gh/${owner}/${repo}@${branch}/${encodedPath}`;
+    // 安全：默认返回代理路径（/api/img/...）存库——需要登录才能取图，不再产生公开 CDN 引用
+    const proxyPath = `/api/img/${githubPath}`;
     return jsonResponse({
-      url: cdnUrl,
+      url: proxyPath,
       cdnUrl,
       path: githubPath,
       size: file.size,
