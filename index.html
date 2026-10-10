@@ -722,9 +722,17 @@
         ]);
         const sectionLoadedAt = {};
         function selectUserAuthRows() { return 'username,avatar,permission,role,last_active,is_online'; }
+        function imgProxy(url) {
+            if (!url || typeof url !== 'string') return url;
+            var m;
+            if ((m = url.match(/^https:\/\/cdn\.jsdelivr\.net\/gh\/([^\/]+)\/([^@\/]+)@([^\/]+)\/(.+)$/))) return '/api/img/' + m[4];
+            if ((m = url.match(/^https:\/\/raw\.githubusercontent\.com\/([^\/]+)\/([^\/]+)\/([^\/]+)\/(.+)$/))) return '/api/img/' + m[4];
+            if ((m = url.match(/^https:\/\/github\.com\/([^\/]+)\/([^\/]+)\/blob\/([^\/]+)\/(.+)$/))) return '/api/img/' + m[4];
+            return url;
+        }
         function getSessionToken() { return localStorage.getItem('couple_session_token') || ''; }
-        function setSession(username, sessionToken) { localStorage.setItem('couple_logged_user', username); localStorage.setItem('couple_session_token', sessionToken); }
-        function clearSession() { localStorage.removeItem('couple_logged_user'); localStorage.removeItem('couple_session_token'); }
+        function setSession(username, sessionToken) { localStorage.setItem('couple_logged_user', username); localStorage.setItem('couple_session_token', sessionToken); try { document.cookie = 'couple_t=' + encodeURIComponent(sessionToken) + '; path=/; max-age=2592000; samesite=lax' + (location.protocol === 'https:' ? '; secure' : ''); } catch (e) {} }
+        function clearSession() { localStorage.removeItem('couple_logged_user'); localStorage.removeItem('couple_session_token'); try { document.cookie = 'couple_t=; path=/; max-age=0; samesite=lax'; } catch (e) {} }
         async function accountApi(action, payload = {}) {
             if (window.location.protocol === 'file:') throw new Error('账号安全接口 /api/account 只在部署到 Cloudflare Pages 或 Vercel 后可用，不能直接双击本地 HTML 登录。');
             const controller = new AbortController();
@@ -976,8 +984,8 @@
                 if (!medias.length) { container.innerHTML = '<div style="color:#999;padding:8px;">No media</div>'; return; }
                 let html = '';
                 for (let media of medias) {
-                    if (media.type === 'video') html += `<div class="feed-media-item" onclick="openVideoModal('${media.data}')"><video src="${media.data}" preload="metadata" muted playsinline style="pointer-events:none;"></video></div>`;
-                    else html += `<div class="feed-media-item" onclick="openImageModal('${media.data}')"><img src="${media.data}" loading="lazy" decoding="async"></div>`;
+                    if (media.type === 'video') html += `<div class="feed-media-item" onclick="openVideoModal('${imgProxy(media.data)}')"><video src="${imgProxy(media.data)}" preload="metadata" muted playsinline style="pointer-events:none;"></video></div>`;
+                    else html += `<div class="feed-media-item" onclick="openImageModal('${imgProxy(media.data)}')"><img src="${imgProxy(media.data)}" loading="lazy" decoding="async"></div>`;
                 }
                 container.innerHTML = html;
             } catch(e) {
@@ -1190,7 +1198,7 @@
                     container.innerHTML = '<span style="color:#999;font-size:12px;">No image</span>';
                     return;
                 }
-                container.innerHTML = `<img src="${data.photo}" loading="lazy" decoding="async" style="max-width:100px;max-height:100px;border-radius:10px;margin-top:8px;cursor:pointer;" onclick="openImageModal('${data.photo}')">`;
+                container.innerHTML = `<img src="${imgProxy(data.photo)}" loading="lazy" decoding="async" style="max-width:100px;max-height:100px;border-radius:10px;margin-top:8px;cursor:pointer;" onclick="openImageModal('${data.photo}')">`;
             } catch(e) {
                 container.innerHTML = '<span style="color:#999;font-size:12px;">Image load failed</span>';
             }
@@ -2839,7 +2847,7 @@
             }
         }
         
-        function openImageModal(src){ 
+        function openImageModal(src){ src = imgProxy(src); 
             const imgs = Array.from(document.querySelectorAll('#galleryContainer img, #messageList img'));
             currentPhotosList = imgs.map(img => img.src);
             currentPhotoIndex = currentPhotosList.indexOf(src);
@@ -2873,7 +2881,7 @@
         }
         function closeModal(){ document.getElementById('imageModal').style.display='none'; }
         function openVideoModal(src){ 
-            document.getElementById('modalVideo').src=src; 
+            document.getElementById('modalVideo').src=imgProxy(src); 
             document.getElementById('videoModal').style.display='flex'; 
         }
         function closeVideoModal(){ document.getElementById('videoModal').style.display='none'; }
@@ -2886,7 +2894,7 @@
         async function loadCurrentUserAvatar() {
             if (!currentUser) return;
             const avatar = currentUserInfo && currentUserInfo.avatar;
-            if (avatar) document.getElementById('userAvatarImg').src = avatar;
+            if (avatar) document.getElementById('userAvatarImg').src = imgProxy(avatar);
         }
         async function forceRefreshUserData(options = {}) {
             const allowLocalFallback = options.allowLocalFallback !== false;
@@ -3056,7 +3064,7 @@
         }
         async function autoLogin() {
             let savedUser = localStorage.getItem('couple_logged_user');
-            if (!savedUser || !getSessionToken()) return false;
+            if (!savedUser || !getSessionToken()) return false; try { document.cookie = 'couple_t=' + encodeURIComponent(getSessionToken()) + '; path=/; max-age=2592000; samesite=lax' + (location.protocol === 'https:' ? '; secure' : ''); } catch (e) {}
             try {
                 let users = await loadUserData({ allowLocalFallback: false });
                 if (users[savedUser]) {
