@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
@@ -3081,7 +3081,6 @@
             return false;
         }
         async function unlockEntryGate() {
-            document.getElementById('bubbleLayer').style.display = 'none';
             document.getElementById('mainPage').style.display = 'none';
             document.getElementById('loginPage').style.display = 'flex';
             const restored = await autoLogin();
@@ -3178,11 +3177,6 @@
                 b.style.top=Math.random()*(window.innerHeight-60)+'px'; 
                 b.onclick=function(){ 
                     b.remove(); 
-                    bubbleClicked++; 
-                    document.getElementById('bubbleCount').innerText=bubbleClicked; 
-                    if(bubbleClicked>=10){ 
-                        unlockEntryGate(); 
-                    } 
                 }; 
                 document.getElementById('bubbleLayer').appendChild(b); 
             }, i*300);
@@ -3195,11 +3189,6 @@
                     b.style.top=Math.random()*(window.innerHeight-60)+'px'; 
                     b.onclick=function(){ 
                         b.remove(); 
-                        bubbleClicked++; 
-                        document.getElementById('bubbleCount').innerText=bubbleClicked; 
-                        if(bubbleClicked>=10){ 
-                            unlockEntryGate(); 
-                        } 
                     }; 
                     document.getElementById('bubbleLayer').appendChild(b); 
                 } 
@@ -3231,6 +3220,7 @@
                 modalEl.addEventListener('touchend', e => { touchEndX = e.changedTouches[0].screenX; handleDisplaySwipe(); }, {passive: true});
             }
         };
+        unlockEntryGate();
     </script>
 </body>
 </html>
