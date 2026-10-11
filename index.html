@@ -304,6 +304,70 @@
         .qq-sync-note { margin-top: 12px; padding: 10px 12px; border-radius: 14px; background: white; color: #777; font-size: 12px; border-left: 4px solid #ffb7c5; }
         .mode-selector { background: #f9f0f2; padding: 15px; border-radius: 20px; margin-bottom: 20px; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 15px; }
         .mode-selector select { padding: 8px 15px; border-radius: 30px; border: 2px solid #ffb7c5; background: white; cursor: pointer; }
+        /* ===== 后台重设计：吸顶头 + 分区Tab + 卡片（移动端优先） ===== */
+        .admin-panel { padding: 0; background: #fff0f3; }
+        .adm-head { position: sticky; top: 0; z-index: 20; box-shadow: 0 4px 14px rgba(255,71,87,.18); }
+        .adm-topbar { background: linear-gradient(135deg,#ff6b81,#ff4757); color: #fff; padding: 14px 16px; display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+        .adm-topbar-title { font-size: 17px; font-weight: 700; white-space: nowrap; }
+        .adm-topbar-actions { display: flex; gap: 8px; }
+        .adm-top-btn { background: rgba(255,255,255,.22); color: #fff; border: 1px solid rgba(255,255,255,.45); padding: 7px 12px; border-radius: 999px; font-size: 13px; cursor: pointer; white-space: nowrap; }
+        .adm-top-btn.ghost { background: rgba(255,255,255,.12); }
+        .adm-tabs { display: flex; gap: 8px; overflow-x: auto; padding: 10px 12px; background: #fff0f3; -webkit-overflow-scrolling: touch; scrollbar-width: none; }
+        .adm-tabs::-webkit-scrollbar { display: none; }
+        .adm-tab { flex: 0 0 auto; border: 1.5px solid #ffd1d8; cursor: pointer; background: #fff; color: #ff6b81; padding: 8px 15px; border-radius: 999px; font-size: 14px; font-weight: 600; display: flex; align-items: center; gap: 5px; }
+        .adm-tab.active { background: linear-gradient(135deg,#ff6b81,#ff4757); color: #fff; border-color: transparent; box-shadow: 0 3px 10px rgba(255,107,129,.35); }
+        .adm-badge { background: #ff4757; color: #fff; border-radius: 999px; font-size: 11px; min-width: 18px; height: 18px; display: inline-flex; align-items: center; justify-content: center; padding: 0 5px; }
+        .adm-tab.active .adm-badge { background: #fff; color: #ff4757; }
+        .adm-body { flex: 1; width: 100%; max-width: 760px; margin: 0 auto; padding: 14px 14px 46px; }
+        .adm-card { background: #fff; border-radius: 18px; padding: 16px; margin-bottom: 14px; box-shadow: 0 4px 16px rgba(255,107,129,.10); }
+        .adm-card h3 { color: #ff4757; font-size: 16px; margin-bottom: 12px; }
+        .adm-stat-grid { display: grid; grid-template-columns: repeat(2,1fr); gap: 12px; }
+        .adm-stat { background: linear-gradient(135deg,#fff5f7,#ffeef1); border: 1px solid #ffdce2; border-radius: 16px; padding: 18px 10px; text-align: center; }
+        .adm-stat .num { font-size: 26px; font-weight: 800; color: #ff4757; line-height: 1; }
+        .adm-stat .lbl { font-size: 13px; color: #888; margin-top: 6px; }
+        .adm-quick { display: grid; grid-template-columns: repeat(2,1fr); gap: 10px; margin-top: 14px; }
+        .adm-quick button { border: none; cursor: pointer; border-radius: 14px; padding: 16px 10px; font-size: 14px; font-weight: 600; color: #fff; background: linear-gradient(135deg,#ff8fa3,#ff6b81); box-shadow: 0 4px 12px rgba(255,107,129,.25); }
+        .adm-quick button.alt { background: linear-gradient(135deg,#7fc8ff,#3da9fc); }
+        .adm-quick button.warn { background: linear-gradient(135deg,#ffb05c,#ff8a3d); }
+        .adm-quick button.gray { background: linear-gradient(135deg,#b8c0cc,#8b95a5); }
+        .adm-user { display: flex; flex-direction: column; gap: 10px; }
+        .adm-user-head { display: flex; align-items: center; gap: 10px; }
+        .adm-user-ava { width: 44px; height: 44px; border-radius: 50%; background: linear-gradient(135deg,#ff8fa3,#ff4757); color: #fff; display: flex; align-items: center; justify-content: center; font-size: 20px; flex: 0 0 auto; }
+        .adm-user-name { font-size: 16px; font-weight: 700; color: #333; }
+        .adm-role-tag { font-size: 12px; padding: 2px 9px; border-radius: 999px; margin-left: 6px; }
+        .adm-role-tag.admin { background: #fff1d6; color: #e8930c; }
+        .adm-role-tag.user { background: #e9f7ff; color: #3da9fc; }
+        .adm-user-meta { font-size: 13px; color: #888; }
+        .adm-user-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+        .adm-ua-btn { flex: 1 1 auto; min-width: 96px; border: none; cursor: pointer; border-radius: 12px; padding: 11px; font-size: 13px; font-weight: 600; color: #fff; background: #ff8fa3; }
+        .adm-ua-btn.green { background: #52c41a; }
+        .adm-ua-btn.blue { background: #3da9fc; }
+        .adm-ua-btn.red { background: #ff4757; }
+        .adm-ua-btn.gray { background: #9aa3af; }
+        .adm-perm { display: flex; gap: 6px; flex-wrap: wrap; width: 100%; }
+        .adm-perm select { flex: 1 1 160px; padding: 10px; border-radius: 12px; border: 1.5px solid #ffd1d8; font-size: 13px; background: #fff; }
+        .adm-chips { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 8px; scrollbar-width: none; }
+        .adm-chips::-webkit-scrollbar { display: none; }
+        .adm-chip { flex: 0 0 auto; border: 1.5px solid #ffd1d8; background: #fff; color: #ff6b81; padding: 8px 14px; border-radius: 999px; font-size: 13px; font-weight: 600; cursor: pointer; }
+        .adm-chip.active { background: #ff6b81; color: #fff; border-color: #ff6b81; }
+        .adm-item { background: #fff; border: 1px solid #ffe4e8; border-radius: 14px; padding: 13px; margin-bottom: 10px; }
+        .adm-item-text { font-size: 14px; color: #333; line-height: 1.5; word-break: break-word; }
+        .adm-item-meta { font-size: 12px; color: #999; margin: 6px 0; display: flex; flex-wrap: wrap; gap: 10px; }
+        .adm-item-foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
+        .adm-vis { display: flex; align-items: center; gap: 6px; font-size: 12px; color: #888; flex-wrap: wrap; }
+        .adm-del-btn { border: none; cursor: pointer; background: #ff4757; color: #fff; padding: 8px 16px; border-radius: 999px; font-size: 13px; font-weight: 600; }
+        .adm-log { position: relative; padding-left: 18px; }
+        .adm-log::before { content: ''; position: absolute; left: 5px; top: 6px; bottom: 6px; width: 2px; background: #ffd8e0; }
+        .adm-log-item { position: relative; background: #fff; border: 1px solid #ffe4e8; border-radius: 12px; padding: 10px 12px; margin-bottom: 9px; }
+        .adm-log-item::before { content: ''; position: absolute; left: -17px; top: 14px; width: 9px; height: 9px; border-radius: 50%; background: #ff6b81; border: 2px solid #fff; }
+        .adm-log-act { font-size: 13px; font-weight: 600; color: #ff4757; }
+        .adm-log-meta { font-size: 11px; color: #999; margin-top: 3px; }
+        .adm-log-detail { font-size: 12px; color: #777; margin-top: 3px; word-break: break-word; }
+        .adm-field { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+        .adm-field select { flex: 1 1 180px; padding: 11px; border-radius: 12px; border: 1.5px solid #ffd1d8; font-size: 14px; background: #fff; }
+        .adm-empty { text-align: center; color: #aaa; padding: 40px 20px; font-size: 14px; }
+        .adm-loading { color: #ff8fa3; text-align: center; padding: 30px; font-size: 14px; }
+        @media (max-width: 480px) { .adm-topbar-title { font-size: 15px; } .adm-top-btn { padding: 6px 10px; font-size: 12px; } }
         .header { text-align: center; padding: 30px 0 15px; }
         .couple-days { background: rgba(255, 107, 129, 0.15); display: inline-block; padding: 6px 20px; border-radius: 40px; font-size: 18px; font-weight: bold; color: #ff4757; margin-top: 5px; }
         .nav { display: flex; justify-content: center; gap: 10px; margin-bottom: 30px; flex-wrap: wrap; }
@@ -515,7 +579,19 @@
     <div id="passwordModal" class="modal-overlay"><div class="modal-card"><span class="close-modal" onclick="closeModalById('passwordModal')">&times;</span><h3>🔐 修改密码</h3><input type="password" id="oldPwd" placeholder="原密码"><input type="password" id="newPwd" placeholder="新密码"><input type="password" id="confirmPwd" placeholder="确认新密码"><button class="submit-btn" onclick="changePassword()">确认修改</button></div></div>
     <div id="registerModal" class="modal-overlay"><div class="modal-card"><span class="close-modal" onclick="closeModalById('registerModal')">&times;</span><h3>📝 注册新账号</h3><input type="text" id="newUsername" placeholder="账号 (boy/girl风格)"><input type="password" id="newUserPwd" placeholder="密码"><button class="submit-btn" onclick="registerNewUser()">注册</button></div></div>
     <div id="setUserPasswordModal" class="modal-overlay"><div class="modal-card"><span class="close-modal" onclick="closeModalById('setUserPasswordModal')">&times;</span><h3>🔐 设置账号密码</h3><input type="text" id="setPwdUsername" placeholder="账号" readonly><input type="password" id="setPwdNew" placeholder="新密码"><input type="password" id="setPwdConfirm" placeholder="确认新密码"><button class="submit-btn" onclick="setUserPassword()">保存新密码</button></div></div>
-    <div id="adminPanel" class="admin-panel"><div class="admin-container"><div class="admin-title"><h2>🔧 情侣小站 · 后台管理</h2><div><button class="admin-btn success" onclick="showRegisterModal()">➕ 注册新账号</button><button class="admin-btn" onclick="closeAdminPanel()">关闭后台</button></div></div><div class="mode-selector"><label>📦 相册存储模式：</label><select id="adminStorageModeSelect" onchange="adminSetStorageMode()"><option value="cloud">☁️ 图床模式（无限容量）</option><option value="local">💾 本地存储（测试用）</option></select></div><div id="adminContent"></div></div></div>
+    <div id="adminPanel" class="admin-panel">
+      <div class="adm-head">
+        <div class="adm-topbar">
+            <div class="adm-topbar-title">🔧 情侣小站 · 后台管理</div>
+            <div class="adm-topbar-actions">
+                <button class="adm-top-btn" onclick="showRegisterModal()">➕ 注册账号</button>
+                <button class="adm-top-btn ghost" onclick="closeAdminPanel()">✕ 关闭</button>
+            </div>
+        </div>
+        <div class="adm-tabs" id="adminTabs"></div>
+      </div>
+        <div class="adm-body" id="adminContent"></div>
+    </div>
     <div class="image-modal" id="imageModal" onclick="closeModal()">
         <span class="close-modal-icon" onclick="closeModal()">&times;</span>
         <button class="nav-arrow left" onclick="prevPhoto(event)">&lt;</button>
