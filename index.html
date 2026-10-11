@@ -512,7 +512,21 @@
         // ========== Supabase 数据库初始化 ==========
         const SUPABASE_URL = 'https://txeynuvttibnilvttieu.supabase.co';
         const SUPABASE_ANON_KEY = 'sb_publishable_Z8E9qPbi6F2NLzoQh9fhfw__goWiZZ4'; 
-        const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+        // 数据请求统一走 /api/db 代理（服务端鉴权，RLS 封死后的正确通道）
+        function dbProxyFetch(input, init) {
+            var url = typeof input === 'string' ? new URL(input, window.location.origin) : new URL(input.url);
+            if (url.pathname.indexOf('/rest/v1/') >= 0) {
+                var headers = new Headers(init ? init.headers : undefined);
+                headers.set('X-Couple-Token', localStorage.getItem('couple_session_token') || '');
+                return fetch('/api/db' + url.pathname + url.search, {
+                    method: init ? init.method : 'GET',
+                    headers: headers,
+                    body: init && init.body ? init.body : undefined
+                });
+            }
+            return fetch(input, init);
+        }
+        const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, { global: { fetch: dbProxyFetch } });
         
         // 临时 GitHub 前端直传测试模式：token 只在浏览器会话中粘贴使用，不写进源码。
         const GITHUB_DIRECT_UPLOAD_TEST_MODE = false;
