@@ -41,11 +41,9 @@ export async function onRequest(context) {
     try { session = await requireSession(cfg, token); }
     catch (e) { return jsonResponse({ error: '未登录或登录已失效，请重新登录' }, 401); }
 
-    if (!TABLES[table]) return jsonResponse({ error: '未知的数据模块' }, 400);
-
     const isAdmin = await checkAdmin(cfg, session.username);
 
-    // ---------- 列表（管理员） ----------
+    // ---------- 列表（管理员，不需要 table 参数） ----------
     if (action === 'list') {
       if (!isAdmin) return jsonResponse({ error: '仅管理员可查看回收站' }, 403);
       const out = [];
@@ -69,6 +67,7 @@ export async function onRequest(context) {
       return jsonResponse({ items: out }, 200);
     }
 
+    if (!TABLES[table]) return jsonResponse({ error: '未知的数据模块' }, 400);
     if (!id) return jsonResponse({ error: '缺少记录 ID' }, 400);
 
     // 取目标记录
