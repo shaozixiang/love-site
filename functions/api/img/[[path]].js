@@ -9,7 +9,7 @@
 
 // 允许的仓库内路径前缀（按需收紧）
 const ALLOWED_PREFIXES = [
-  '/photos/', '/messages/', '/feeds/', '/memories/', '/bubble/', '/videos/', '/uploads/'
+  '/photos/', '/messages/', '/feeds/', '/memories/', '/bubble/', '/videos/', '/uploads/', '/trash/', '/common/', '/avatars/'
 ];
 
 export async function onRequest(context) {
