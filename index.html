@@ -774,6 +774,29 @@
             if (!response.ok) throw new Error(result.error || `/api/account 请求失败，HTTP ${response.status}`);
             return result;
         }
+        async function trashApi(action, table, id) {
+            const controller = new AbortController();
+            const timeout = setTimeout(() => controller.abort(), 30000);
+            let resp;
+            try {
+                resp = await fetch('/api/trash', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'X-Couple-Token': getSessionToken() },
+                    body: JSON.stringify({ action, table, id: id || '', sessionToken: getSessionToken() }),
+                    signal: controller.signal
+                });
+            } catch(e) {
+                clearTimeout(timeout);
+                if (e && e.name === 'AbortError') throw new Error('/api/trash 超时，请检查网络后重试。');
+                throw e;
+            }
+            clearTimeout(timeout);
+            let result = {};
+            const txt = await resp.text();
+            try { result = txt ? JSON.parse(txt) : {}; } catch(_) { throw new Error('回收站返回格式错误'); }
+            if (!resp.ok) throw new Error(result.error || ('请求失败 HTTP ' + resp.status));
+            return result;
+        }
         function userArrayToMap(list = []) {
             const map = {};
             (list || []).forEach(user => { if (user && user.username) map[user.username] = normalizeUserInfo(user.username, user); });
@@ -781,6 +804,7 @@
         }
         function selectContentRows(table, columns, options = {}) {
             let query = sb.from(table).select(columns);
+            query = query.is('deleted_at', null);
             if (!isAdmin && !isCoupleAccount()) query = query.or('visibility.is.null,visibility.eq.public');
             query = query.order(options.orderBy || 'created_at', { ascending: !!options.ascending });
             return query.limit(options.limit || PAGE_LIMIT);
@@ -1062,7 +1086,8 @@
         }
         async function deleteFeed(id) { 
             if (!(await canDeleteRecord('feeds', id))) return;
-            try { await sb.from('feeds').delete().eq('id', id); } catch(e) { console.error(e); }
+            if (!confirm('确定删除吗？\n删除后内容进入管理员后台「回收站」，可随时恢复。')) return;
+            try { await trashApi('delete','feeds',id); alert('已移入回收站'); } catch(e) { alert('删除失败：' + (e.message || e)); return; }
             // 记录删除日志
             logAction('delete_feed', { feed_id: id });
             renderFeeds(); 
@@ -1270,7 +1295,8 @@
         }
         async function deleteMsg(id){ 
             if (!(await canDeleteRecord('messages', id))) return;
-            try { await sb.from('messages').delete().eq('id', id); } catch(e) { console.error(e); }
+            if (!confirm('确定删除吗？\n删除后内容进入管理员后台「回收站」，可随时恢复。')) return;
+            try { await trashApi('delete','messages',id); alert('已移入回收站'); } catch(e) { alert('删除失败：' + (e.message || e)); return; }
             // 记录删除日志
             logAction('delete_message', { msg_id: id });
             renderMessages(); 
@@ -1354,7 +1380,8 @@
         }
         async function deleteLove(id){ 
             if (!(await canDeleteRecord('loves', id))) return;
-            try { await sb.from('loves').delete().eq('id', id); } catch(e) { console.error(e); }
+            if (!confirm('确定删除吗？\n删除后内容进入管理员后台「回收站」，可随时恢复。')) return;
+            try { await trashApi('delete','loves',id); alert('已移入回收站'); } catch(e) { alert('删除失败：' + (e.message || e)); return; }
             renderLoves(); 
         }
         // ========== 一起做过的事 ==========
@@ -1393,7 +1420,8 @@
         }
         async function deleteMemory(id){ 
             if (!(await canDeleteRecord('memories', id))) return;
-            try { await sb.from('memories').delete().eq('id', id); } catch(e) { console.error(e); }
+            if (!confirm('确定删除吗？\n删除后内容进入管理员后台「回收站」，可随时恢复。')) return;
+            try { await trashApi('delete','memories',id); alert('已移入回收站'); } catch(e) { alert('删除失败：' + (e.message || e)); return; }
             renderMemories(); 
         }
         // ========== 待办备忘录模块 ==========
@@ -1457,7 +1485,8 @@
         
         async function deleteMemo(id) {
             if (!(await canDeleteRecord('memos', id))) return;
-            try { await sb.from('memos').delete().eq('id', id); } catch(e) { console.error(e); }
+            if (!confirm('确定删除吗？\n删除后内容进入管理员后台「回收站」，可随时恢复。')) return;
+            try { await trashApi('delete','memos',id); alert('已移入回收站'); } catch(e) { alert('删除失败：' + (e.message || e)); return; }
             renderMemos();
         }
         // ========== 行程模块 与 纪念日倒计时 ==========
@@ -1507,7 +1536,8 @@
         
         async function deleteSchedule(id) { 
             if (!(await canDeleteRecord('schedules', id))) return;
-            try { await sb.from('schedules').delete().eq('id', id); } catch(e) { console.error(e); }
+            if (!confirm('确定删除吗？\n删除后内容进入管理员后台「回收站」，可随时恢复。')) return;
+            try { await trashApi('delete','schedules',id); alert('已移入回收站'); } catch(e) { alert('删除失败：' + (e.message || e)); return; }
             renderSchedules(); 
         }
         
@@ -1559,7 +1589,8 @@
         
         async function deleteCountdown(id) { 
             if (!(await canDeleteRecord('countdowns', id))) return;
-            try { await sb.from('countdowns').delete().eq('id', id); } catch(e) { console.error(e); }
+            if (!confirm('确定删除吗？\n删除后内容进入管理员后台「回收站」，可随时恢复。')) return;
+            try { await trashApi('delete','countdowns',id); alert('已移入回收站'); } catch(e) { alert('删除失败：' + (e.message || e)); return; }
             renderCountdowns(); 
         }
         // ========== 旅行地图 ==========
@@ -1632,7 +1663,8 @@
         }
         async function deleteMarker(id) { 
             if (!(await canDeleteRecord('travel_markers', id))) return;
-            try { await sb.from('travel_markers').delete().eq('id', id); } catch(e) { console.error(e); }
+            if (!confirm('确定删除吗？\n删除后内容进入管理员后台「回收站」，可随时恢复。')) return;
+            try { await trashApi('delete','travel_markers',id); alert('已移入回收站'); } catch(e) { alert('删除失败：' + (e.message || e)); return; }
             loadMarkers(); 
         }
         // ========== 生气模式 ==========
@@ -1683,7 +1715,7 @@
                 const { data: modeData } = await sb.from('angry_mode').select('id,enabled,by').limit(1).single();
                 if (modeData) mode = modeData;
                 
-                const { data: apData } = await sb.from('apologies').select('id,content,author,author_name,created_at,status').order('created_at', { ascending: false }).limit(PAGE_LIMIT);
+                const { data: apData } = await sb.from('apologies').select('id,content,author,author_name,created_at,status').is('deleted_at', null).order('created_at', { ascending: false }).limit(PAGE_LIMIT);
                 if (apData) ap = apData.map(a => ({
                     id: a.id, content: a.content, from: a.author, 
                     fromName: a.author_name, time: new Date(a.created_at).toLocaleString(), 
@@ -2043,8 +2075,10 @@
             html += `</tbody></table></div>`;
             html += renderQqSyncPanel();
             html += renderAdminSectionShell();
+            html += renderTrashPanel();
             html += '<div id="adminLogSection" class="admin-section" style="color:#888;">操作日志正在后台加载...</div>'; 
             document.getElementById('adminContent').innerHTML = html;
+            setTimeout(() => { loadTrashSection().catch(e => { const t = document.getElementById('adminTrashSection'); if (t) t.innerHTML = '<h3>🗑️ 回收站</h3><div style="color:#c00;">回收站加载失败：' + escapeHtml(e.message || String(e)) + '</div>'; }); }, 200);
             setTimeout(() => {
                 renderAdminLogSection().then(sectionHtml => {
                     const target = document.getElementById('adminLogSection');
@@ -2062,7 +2096,7 @@
             return;
             
             try {
-                const { data: feeds } = await sb.from('feeds').select('id,description,author_name,created_at,visibility').order('created_at', { ascending: false }).limit(ADMIN_LIMIT);
+                const { data: feeds } = await sb.from('feeds').select('id,description,author_name,created_at,visibility').is('deleted_at', null).order('created_at', { ascending: false }).limit(ADMIN_LIMIT);
                 html += `<div class="admin-section"><h3>📸 时光相册动态 (${feeds ? feeds.length : 0}条)</h3><table class="data-table"><thead><tr><th>描述</th><th>作者</th><th>时间</th><th>可见性</th><th>操作</th></tr></thead><tbody>`; 
                 if (feeds) for(let f of feeds) { 
                     html += `<tr><td>${escapeHtml(f.description || '').substring(0,30)}</td><td>${f.author_name}</td><td>${new Date(f.created_at).toLocaleString()}</td><td>${renderVisibilityAdminControls('feed', f.id, f.visibility)}</td><td><button class="admin-btn danger" onclick="deleteFeed('${f.id}')">删除</button></td></tr>`; 
@@ -2072,7 +2106,7 @@
             
             // 💬 留言板管理
             try {
-                const { data: messages } = await sb.from('messages').select('id,content,author_name,created_at,visibility').order('created_at', { ascending: false }).limit(ADMIN_LIMIT);
+                const { data: messages } = await sb.from('messages').select('id,content,author_name,created_at,visibility').is('deleted_at', null).order('created_at', { ascending: false }).limit(ADMIN_LIMIT);
                 html += `<div class="admin-section"><h3>💬 留言板 (${messages ? messages.length : 0}条)</h3><table class="data-table"><thead><tr><th>内容</th><th>作者</th><th>时间</th><th>可见性</th><th>操作</th></tr></thead><tbody>`;
                 if (messages) for(let m of messages) {
                     html += `<tr><td>${escapeHtml(m.content || '').substring(0,30)}</td><td>${m.author_name}</td><td>${new Date(m.created_at).toLocaleString()}</td><td>${renderVisibilityAdminControls('message', m.id, m.visibility)}</td><td><button class="admin-btn danger" onclick="adminDelete('message', '${m.id}')">删除</button></td></tr>`;
@@ -2082,7 +2116,7 @@
             
             // 💌 感动的话管理
             try {
-                const { data: loves } = await sb.from('loves').select('id,content,author_name,privacy,created_at,visibility').order('created_at', { ascending: false }).limit(ADMIN_LIMIT);
+                const { data: loves } = await sb.from('loves').select('id,content,author_name,privacy,created_at,visibility').is('deleted_at', null).order('created_at', { ascending: false }).limit(ADMIN_LIMIT);
                 html += `<div class="admin-section"><h3>💌 感动的话 (${loves ? loves.length : 0}条)</h3><table class="data-table"><thead><tr><th>内容</th><th>作者</th><th>隐私</th><th>时间</th><th>可见性</th><th>操作</th></tr></thead><tbody>`;
                 if (loves) for(let l of loves) {
                     html += `<tr><td>${escapeHtml(l.content || '').substring(0,30)}</td><td>${l.author_name}</td><td>${l.privacy === 'private' ? '🔒 私密' : '公开'}</td><td>${new Date(l.created_at).toLocaleString()}</td><td>${renderVisibilityAdminControls('love', l.id, l.visibility)}</td><td><button class="admin-btn danger" onclick="adminDelete('love', '${l.id}')">删除</button></td></tr>`;
@@ -2092,7 +2126,7 @@
             
             // ✨ 一起做过的事管理
             try {
-                const { data: memories } = await sb.from('memories').select('id,content,author_name,created_at,visibility').order('created_at', { ascending: false }).limit(ADMIN_LIMIT);
+                const { data: memories } = await sb.from('memories').select('id,content,author_name,created_at,visibility').is('deleted_at', null).order('created_at', { ascending: false }).limit(ADMIN_LIMIT);
                 html += `<div class="admin-section"><h3>✨ 一起做过的事 (${memories ? memories.length : 0}条)</h3><table class="data-table"><thead><tr><th>内容</th><th>作者</th><th>时间</th><th>可见性</th><th>操作</th></tr></thead><tbody>`;
                 if (memories) for(let mem of memories) {
                     html += `<tr><td>${escapeHtml(mem.content || '').substring(0,30)}</td><td>${mem.author_name}</td><td>${new Date(mem.created_at).toLocaleString()}</td><td>${renderVisibilityAdminControls('memory', mem.id, mem.visibility)}</td><td><button class="admin-btn danger" onclick="adminDelete('memory', '${mem.id}')">删除</button></td></tr>`;
@@ -2102,7 +2136,7 @@
             
             // 📋 待办备忘录管理
             try {
-                const { data: memos } = await sb.from('memos').select('id,content,author_name,priority,done,created_at,visibility').order('created_at', { ascending: false }).limit(ADMIN_LIMIT);
+                const { data: memos } = await sb.from('memos').select('id,content,author_name,priority,done,created_at,visibility').is('deleted_at', null).order('created_at', { ascending: false }).limit(ADMIN_LIMIT);
                 html += `<div class="admin-section"><h3>📋 待办备忘录 (${memos ? memos.length : 0}条)</h3><table class="data-table"><thead><tr><th>内容</th><th>作者</th><th>优先级</th><th>状态</th><th>可见性</th><th>操作</th></tr></thead><tbody>`;
                 if (memos) for(let memo of memos) {
                     const priorityLabels = { high: '🔴 高', medium: '🟡 中', low: '🟢 低' };
@@ -2113,7 +2147,7 @@
             
             // 📝 行程管理
             try {
-                const { data: schedules } = await sb.from('schedules').select('id,title,start_date,end_date,author_name,created_at,visibility').order('created_at', { ascending: false }).limit(ADMIN_LIMIT);
+                const { data: schedules } = await sb.from('schedules').select('id,title,start_date,end_date,author_name,created_at,visibility').is('deleted_at', null).order('created_at', { ascending: false }).limit(ADMIN_LIMIT);
                 html += `<div class="admin-section"><h3>📝 行程安排 (${schedules ? schedules.length : 0}条)</h3><table class="data-table"><thead><tr><th>标题</th><th>日期</th><th>作者</th><th>可见性</th><th>操作</th></tr></thead><tbody>`;
                 if (schedules) for(let s of schedules) {
                     let dateRange = s.start_date ? (s.end_date ? `${s.start_date} ~ ${s.end_date}` : s.start_date) : '';
@@ -2124,7 +2158,7 @@
             
             // ⏰ 纪念日倒计时管理
             try {
-                const { data: countdowns } = await sb.from('countdowns').select('id,name,target_date,author_name,created_at,visibility').order('created_at', { ascending: false }).limit(ADMIN_LIMIT);
+                const { data: countdowns } = await sb.from('countdowns').select('id,name,target_date,author_name,created_at,visibility').is('deleted_at', null).order('created_at', { ascending: false }).limit(ADMIN_LIMIT);
                 html += `<div class="admin-section"><h3>⏰ 纪念日倒计时 (${countdowns ? countdowns.length : 0}条)</h3><table class="data-table"><thead><tr><th>标题</th><th>目标日期</th><th>作者</th><th>可见性</th><th>操作</th></tr></thead><tbody>`;
                 if (countdowns) for(let c of countdowns) {
                     html += `<tr><td>${escapeHtml(c.name || '').substring(0,20)}</td><td>${c.target_date || ''}</td><td>${c.author_name}</td><td>${renderVisibilityAdminControls('countdown', c.id, c.visibility)}</td><td><button class="admin-btn danger" onclick="adminDelete('countdown', '${c.id}')">删除</button></td></tr>`;
@@ -2134,7 +2168,7 @@
             
             // 🗺️ 旅行地图标记管理
             try {
-                const { data: markers } = await sb.from('travel_markers').select('id,name,description,author_name,created_at,visibility').order('created_at', { ascending: false }).limit(ADMIN_LIMIT);
+                const { data: markers } = await sb.from('travel_markers').select('id,name,description,author_name,created_at,visibility').is('deleted_at', null).order('created_at', { ascending: false }).limit(ADMIN_LIMIT);
                 html += `<div class="admin-section"><h3>🗺️ 旅行地图标记 (${markers ? markers.length : 0}个)</h3><table class="data-table"><thead><tr><th>名称</th><th>描述</th><th>作者</th><th>可见性</th><th>操作</th></tr></thead><tbody>`;
                 if (markers) for(let mk of markers) {
                     html += `<tr><td>${escapeHtml(mk.name || '').substring(0,15)}</td><td>${escapeHtml(mk.description || '').substring(0,20)}</td><td>${mk.author_name}</td><td>${renderVisibilityAdminControls('marker', mk.id, mk.visibility)}</td><td><button class="admin-btn danger" onclick="adminDelete('marker', '${mk.id}')">删除</button></td></tr>`;
@@ -2288,7 +2322,7 @@
             ];
             let items = [];
             for (let config of configs) {
-                const { data, error } = await sb.from(config.table).select(config.cols).order('created_at', { ascending: false }).limit(ADMIN_LIMIT);
+                const { data, error } = await sb.from(config.table).select(config.cols).is('deleted_at', null).order('created_at', { ascending: false }).limit(ADMIN_LIMIT);
                 if (error) throw new Error(`${getQqSourceLabel(config.table)} 读取失败：${error.message}`);
                 (data || []).forEach(row => {
                     if (normalizeVisibility(row.visibility) !== 'public') return;
@@ -2464,7 +2498,7 @@
             const config = configs[type];
             if (!config) { target.innerHTML = '<div style="color:#c00;padding:12px;">未知分类</div>'; return; }
             try {
-                const { data, error } = await sb.from(config.table).select(config.cols).order('created_at', { ascending: false }).limit(ADMIN_LIMIT);
+                const { data, error } = await sb.from(config.table).select(config.cols).is('deleted_at', null).order('created_at', { ascending: false }).limit(ADMIN_LIMIT);
                 if (error) throw error;
                 const headerHtml = config.headers.map(h => `<th>${h}</th>`).join('');
                 target.innerHTML = `<h3>${config.title} (${data ? data.length : 0}条，最多显示${ADMIN_LIMIT}条)</h3><div style="overflow-x:auto;"><table class="data-table"><thead><tr>${headerHtml}</tr></thead><tbody>${renderAdminRows(type, data || [])}</tbody></table></div>`;
@@ -2473,6 +2507,47 @@
             }
         }
         
+        function renderTrashPanel() {
+            return '<div class="admin-section" id="adminTrashSection" style="color:#888;">🗑️ 回收站加载中...</div>';
+        }
+        function fmtTrashTime(t) { try { return t ? new Date(t).toLocaleString() : ''; } catch(e) { return t || ''; } }
+        async function loadTrashSection() {
+            const target = document.getElementById('adminTrashSection');
+            if (!target) return;
+            const res = await trashApi('list');
+            const items = res.items || [];
+            if (!items.length) { target.innerHTML = '<h3>🗑️ 回收站</h3><div style="color:#888;padding:8px 0;">回收站是空的～删除的内容会出现在这里，可恢复或彻底删除。</div>'; return; }
+            let html = '<h3>🗑️ 回收站（' + items.length + ' 条，永久保留）</h3>';
+            html += '<div style="display:flex;flex-direction:column;gap:10px;">';
+            items.forEach(function(it) {
+                let media = '';
+                (it.media || []).forEach(function(m) {
+                    if (m.isVideo) media += '<video controls preload="none" src="' + m.trashUrl + '" style="max-width:140px;max-height:140px;border-radius:8px;margin:4px 6px 4px 0;background:#000;"></video>';
+                    else media += '<img src="' + m.trashUrl + '" loading="lazy" style="max-width:140px;max-height:140px;border-radius:8px;margin:4px 6px 4px 0;object-fit:cover;" />';
+                });
+                html += '<div class="admin-section" style="border:1px solid #f3c0cb;margin:0;">'
+                    + '<div style="font-weight:600;">[' + escapeHtml(it.type) + '] ' + escapeHtml(it.title || '(无文字内容)') + '</div>'
+                    + '<div style="color:#999;font-size:12px;margin:4px 0;">作者：' + escapeHtml(it.author || '') + '　删除人：' + escapeHtml(it.deleted_by || '') + '　' + fmtTrashTime(it.deleted_at) + '</div>'
+                    + (media ? '<div style="display:flex;flex-wrap:wrap;">' + media + '</div>' : '')
+                    + '<div style="margin-top:6px;display:flex;gap:8px;flex-wrap:wrap;">'
+                    + '<button class="admin-btn" onclick="trashRestore(\'' + it.table + '\',\'' + it.id + '\')">♻️ 恢复</button>'
+                    + '<button class="admin-btn danger" onclick="trashPurge(\'' + it.table + '\',\'' + it.id + '\')">🔥 彻底删除</button>'
+                    + '</div></div>';
+            });
+            html += '</div>';
+            target.innerHTML = html;
+        }
+        async function trashRestore(table, id) {
+            if (!confirm('恢复这条内容吗？\n图片/视频将移回原位，内容重新在对应板块显示。')) return;
+            try { await trashApi('restore', table, id); alert('已恢复'); await loadTrashSection(); renderAdminData(); }
+            catch(e) { alert('恢复失败：' + (e.message || e)); }
+        }
+        async function trashPurge(table, id) {
+            if (!confirm('⚠️ 彻底删除后不可恢复！')) return;
+            if (!confirm('最后确认：永久删除这条内容及其图片/视频？')) return;
+            try { await trashApi('purge', table, id); alert('已彻底删除'); await loadTrashSection(); }
+            catch(e) { alert('彻底删除失败：' + (e.message || e)); }
+        }
         async function renderAdminLogSection() {
             const logs = await getAdminLogs();
             const actionLabels = {
@@ -2498,7 +2573,7 @@
         
         // ========== 管理后台通用删除函数 ==========
         async function adminDelete(type, id) {
-            if (!confirm('确定要删除这条数据吗？')) return;
+            if (!confirm('确定删除这条内容吗？\n删除后进入「回收站」，可在回收站恢复或彻底删除。')) return;
             try {
                 const tableMap = {
                     'feed': 'feeds',
@@ -2512,7 +2587,7 @@
                 };
                 const table = tableMap[type];
                 if (!table) { alert('未知类型'); return; }
-                await sb.from(table).delete().eq('id', id);
+                await trashApi('delete', table, id);
                 // 记录管理员删除日志
                 logAction('admin_delete', { type: type, id: id });
                 renderAdminData();

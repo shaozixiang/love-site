@@ -827,6 +827,7 @@ body {
     // ---------- 数据层 ----------
     function selectContentRows(table, columns, options = {}) {
         let query = sb.from(table).select(columns);
+        query = query.is('deleted_at', null);
         if (!isAdmin && !isCoupleAccount()) query = query.or('visibility.is.null,visibility.eq.public');
         query = query.order(options.orderBy || 'created_at', { ascending: !!options.ascending });
         return query.limit(options.limit || PAGE_LIMIT);
@@ -856,7 +857,7 @@ body {
         if (cached.data && cached.data.length && cached.complete) {
             // 秒开缓存（0 流量），后台增量拉取新增记录
             try {
-                let incQuery = sb.from(table).select(columns);
+                let incQuery = sb.from(table).select(columns).is('deleted_at', null);
                 if (!isAdmin && !isCoupleAccount()) incQuery = incQuery.or('visibility.is.null,visibility.eq.public');
                 const inc = await incQuery.gt('created_at', cached.syncedAt).order('created_at', { ascending: false }).limit(options.limit || PAGE_LIMIT);
                 if (inc.error) throw inc.error;
@@ -930,6 +931,29 @@ body {
         let result = {};
         try { result = responseText ? JSON.parse(responseText) : {}; } catch (e) { throw new Error(`/api/account 返回的不是 JSON。HTTP ${response.status}`); }
         if (!response.ok) throw new Error(result.error || `/api/account 请求失败，HTTP ${response.status}`);
+        return result;
+    }
+    async function trashApi(action, table, id) {
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 30000);
+        let resp;
+        try {
+            resp = await fetch('/api/trash', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'X-Couple-Token': getSessionToken() },
+                body: JSON.stringify({ action, table, id: id || '', sessionToken: getSessionToken() }),
+                signal: controller.signal
+            });
+        } catch (e) {
+            clearTimeout(timeout);
+            if (e && e.name === 'AbortError') throw new Error('/api/trash 超时，请检查网络后重试。');
+            throw e;
+        }
+        clearTimeout(timeout);
+        const txt = await resp.text();
+        let result = {};
+        try { result = txt ? JSON.parse(txt) : {}; } catch (_) { throw new Error('回收站返回格式错误'); }
+        if (!resp.ok) throw new Error(result.error || ('请求失败 HTTP ' + resp.status));
         return result;
     }
     function normalizeUserInfo(username, info = {}) {
@@ -1159,7 +1183,7 @@ body {
         addDanmaku(`${authorDisplay(currentUser)} 评论了动态`);
     }
     async function deleteComment(feedId, commentIdx) {
-        if (!window.confirm('确定删除这条评论吗？删除后无法恢复')) return;
+        if (!window.confirm('确定删除这条评论吗？删除后进入管理员后台「回收站」，可恢复')) return;
         try {
             const { data } = await sb.from('feeds').select('comments').eq('id', feedId).single();
             if (data) {
@@ -1176,8 +1200,8 @@ body {
     }
     async function deleteFeed(id) {
         if (!(await canDeleteRecord('feeds', id))) return;
-        if (!window.confirm('确定删除这条动态吗？删除后无法恢复')) return;
-        try { await sb.from('feeds').delete().eq('id', id); logAction('delete_feed', { feed_id: id }); toast('✅ 动态已删除', 'success'); }
+        if (!window.confirm('确定删除这条动态吗？删除后进入管理员后台「回收站」，可恢复')) return;
+        try { await trashApi('delete','feeds',id); logAction('delete_feed', { feed_id: id }); toast('✅ 已移入回收站，可在后台恢复', 'success'); }
         catch (e) { console.error(e); toast('❌ 删除失败：' + (e.message || '未知错误'), 'error'); }
         renderFeeds({ force: true });
     }
@@ -1290,7 +1314,7 @@ body {
         inputEl.value = '';
     }
     async function deleteMsgComment(msgId, commentIdx) {
-        if (!window.confirm('确定删除这条回复吗？删除后无法恢复')) return;
+        if (!window.confirm('确定删除这条回复吗？删除后进入管理员后台「回收站」，可恢复')) return;
         try {
             const { data } = await sb.from('messages').select('comments').eq('id', msgId).single();
             if (data) {
@@ -1307,8 +1331,8 @@ body {
     }
     async function deleteMsg(id) {
         if (!(await canDeleteRecord('messages', id))) return;
-        if (!window.confirm('确定删除这条留言吗？删除后无法恢复')) return;
-        try { await sb.from('messages').delete().eq('id', id); logAction('delete_message', { msg_id: id }); toast('✅ 留言已删除', 'success'); }
+        if (!window.confirm('确定删除这条留言吗？删除后进入管理员后台「回收站」，可恢复')) return;
+        try { await trashApi('delete','messages',id); logAction('delete_message', { msg_id: id }); toast('✅ 已移入回收站，可在后台恢复', 'success'); }
         catch (e) { console.error(e); toast('❌ 删除失败：' + (e.message || '未知错误'), 'error'); }
         renderMessages({ force: true });
     }
@@ -1356,7 +1380,7 @@ body {
         }).join('');
         document.getElementById('loveList').innerHTML = html || '<div class="empty-tip">暂无感动的话</div>';
     }
-    async function deleteLove(id) { if (!(await canDeleteRecord('loves', id))) return; if (!window.confirm('确定删除这条感动的话吗？删除后无法恢复')) return; try { await sb.from('loves').delete().eq('id', id); toast('✅ 已删除', 'success'); } catch (e) { console.error(e); toast('❌ 删除失败', 'error'); } renderLoves({ force: true }); }
+    async function deleteLove(id) { if (!(await canDeleteRecord('loves', id))) return; if (!window.confirm('确定删除这条感动的话吗？删除后进入管理员后台「回收站」，可恢复')) return; try { await trashApi('delete','loves',id); toast('✅ 已移入回收站，可在后台恢复', 'success'); } catch (e) { console.error(e); toast('❌ 删除失败', 'error'); } renderLoves({ force: true }); }
 
     // ---------- 一起做过的事 ----------
     async function addMemory() {
@@ -1381,7 +1405,7 @@ body {
         let html = mem.map(m => { const canDelete = isAdmin || m.author === currentUser; return `<div class="list-card"><div>✨ ${escapeHtml(m.content)}</div><div class="meta"><span class="who">${m.authorName}</span><span>${m.time}</span>${canDelete ? `<button class="submit-btn small ghost" onclick="deleteMemory('${m.id}')">删除</button>` : ''}</div></div>`; }).join('');
         document.getElementById('memoryList').innerHTML = html || '<div class="empty-tip">暂无打卡记录</div>';
     }
-    async function deleteMemory(id) { if (!(await canDeleteRecord('memories', id))) return; if (!window.confirm('确定删除这条回忆吗？删除后无法恢复')) return; try { await sb.from('memories').delete().eq('id', id); toast('✅ 已删除', 'success'); } catch (e) { console.error(e); toast('❌ 删除失败', 'error'); } renderMemories({ force: true }); }
+    async function deleteMemory(id) { if (!(await canDeleteRecord('memories', id))) return; if (!window.confirm('确定删除这条回忆吗？删除后进入管理员后台「回收站」，可恢复')) return; try { await trashApi('delete','memories',id); toast('✅ 已移入回收站，可在后台恢复', 'success'); } catch (e) { console.error(e); toast('❌ 删除失败', 'error'); } renderMemories({ force: true }); }
 
     // ---------- 待办备忘录 ----------
     async function addMemo() {
@@ -1421,7 +1445,7 @@ body {
         }
         try { await sb.from('memos').update({ done }).eq('id', id); } catch (e) { console.error(e); } renderMemos({ force: true });
     }
-    async function deleteMemo(id) { if (!(await canDeleteRecord('memos', id))) return; if (!window.confirm('确定删除这条待办吗？删除后无法恢复')) return; try { await sb.from('memos').delete().eq('id', id); toast('✅ 已删除', 'success'); } catch (e) { console.error(e); toast('❌ 删除失败', 'error'); } renderMemos({ force: true }); }
+    async function deleteMemo(id) { if (!(await canDeleteRecord('memos', id))) return; if (!window.confirm('确定删除这条待办吗？删除后进入管理员后台「回收站」，可恢复')) return; try { await trashApi('delete','memos',id); toast('✅ 已移入回收站，可在后台恢复', 'success'); } catch (e) { console.error(e); toast('❌ 删除失败', 'error'); } renderMemos({ force: true }); }
 
     // ---------- 行程与纪念日 ----------
     async function addSchedule() {
@@ -1453,7 +1477,7 @@ body {
         }).join('');
         document.getElementById('scheduleList').innerHTML = html || '<div class="empty-tip">暂无行程，添加你们的旅行计划吧~</div>';
     }
-    async function deleteSchedule(id) { if (!(await canDeleteRecord('schedules', id))) return; if (!window.confirm('确定删除这条行程吗？删除后无法恢复')) return; try { await sb.from('schedules').delete().eq('id', id); toast('✅ 已删除', 'success'); } catch (e) { console.error(e); toast('❌ 删除失败', 'error'); } renderSchedules({ force: true }); }
+    async function deleteSchedule(id) { if (!(await canDeleteRecord('schedules', id))) return; if (!window.confirm('确定删除这条行程吗？删除后进入管理员后台「回收站」，可恢复')) return; try { await trashApi('delete','schedules',id); toast('✅ 已移入回收站，可在后台恢复', 'success'); } catch (e) { console.error(e); toast('❌ 删除失败', 'error'); } renderSchedules({ force: true }); }
     async function addCountdown() {
         if (!(await requirePermission('full'))) return;
         const name = document.getElementById('countdownName').value.trim();
@@ -1485,7 +1509,7 @@ body {
         }
         document.getElementById('countdownList').innerHTML = html || '<div class="empty-tip">暂无纪念日，添加你们的特殊日子吧~</div>';
     }
-    async function deleteCountdown(id) { if (!(await canDeleteRecord('countdowns', id))) return; if (!window.confirm('确定删除这个倒计时吗？删除后无法恢复')) return; try { await sb.from('countdowns').delete().eq('id', id); toast('✅ 已删除', 'success'); } catch (e) { console.error(e); toast('❌ 删除失败', 'error'); } renderCountdowns({ force: true }); }
+    async function deleteCountdown(id) { if (!(await canDeleteRecord('countdowns', id))) return; if (!window.confirm('确定删除这个倒计时吗？删除后进入管理员后台「回收站」，可恢复')) return; try { await trashApi('delete','countdowns',id); toast('✅ 已移入回收站，可在后台恢复', 'success'); } catch (e) { console.error(e); toast('❌ 删除失败', 'error'); } renderCountdowns({ force: true }); }
 
     // ---------- 旅行地图 ----------
     function initMap() {
@@ -1530,7 +1554,7 @@ body {
         }
         document.getElementById('markerList').innerHTML = html || '<div class="empty-tip">暂无标记，点击地图添加回忆地点~</div>';
     }
-    async function deleteMarker(id) { if (!(await canDeleteRecord('travel_markers', id))) return; if (!window.confirm('确定删除这个地点吗？删除后无法恢复')) return; try { await sb.from('travel_markers').delete().eq('id', id); toast('✅ 已删除', 'success'); } catch (e) { console.error(e); toast('❌ 删除失败', 'error'); } loadMarkers({ force: true }); }
+    async function deleteMarker(id) { if (!(await canDeleteRecord('travel_markers', id))) return; if (!window.confirm('确定删除这个地点吗？删除后进入管理员后台「回收站」，可恢复')) return; try { await trashApi('delete','travel_markers',id); toast('✅ 已移入回收站，可在后台恢复', 'success'); } catch (e) { console.error(e); toast('❌ 删除失败', 'error'); } loadMarkers({ force: true }); }
 
     // ---------- 生气模式 ----------
     async function toggleAngryMode() {
@@ -1572,7 +1596,7 @@ body {
         try {
             const { data: modeData } = await sb.from('angry_mode').select('id,enabled,by').limit(1).maybeSingle();
             if (modeData) mode = modeData;
-            const { data: apData } = await sb.from('apologies').select('id,content,created_at,status').order('created_at', { ascending: false }).limit(PAGE_LIMIT);
+            const { data: apData } = await sb.from('apologies').select('id,content,created_at,status').is('deleted_at', null).order('created_at', { ascending: false }).limit(PAGE_LIMIT);
             const cloudItems = (apData || []).map(a => ({ id: a.id, content: a.content, from: '', fromName: '', ts: new Date(a.created_at).getTime(), time: new Date(a.created_at).toLocaleString(), status: a.status || 'pending' }));
             // 合并本地兜底记录（换设备前/离线提交的道歉不丢，含发送人信息）
             const localItems = (JSON.parse(localStorage.getItem('couple_apologies') || '[]')).map(a => ({ ...a, ts: a.ts || Date.now() }));
@@ -1905,8 +1929,10 @@ body {
             html += `</tbody></table></div>`;
             html += renderNotifyConfigPanel();
             html += renderAdminSectionShell();
+            html += '<div class="admin-section" id="adminTrashSection" style="color:#888;">🗑️ 回收站加载中...</div>';
             html += '<div id="adminLogSection" class="admin-section" style="color:#888;">操作日志正在后台加载...</div>';
             document.getElementById('adminContent').innerHTML = html;
+            setTimeout(() => { loadTrashSection().catch(e => { const t = document.getElementById('adminTrashSection'); if (t) t.innerHTML = '<h3>🗑️ 回收站</h3><div style="color:#c00;">回收站加载失败：' + escapeHtml(e.message || String(e)) + '</div>'; }); }, 200);
             setTimeout(() => {
                 renderAdminLogSection().then(sectionHtml => { const target = document.getElementById('adminLogSection'); if (target) target.outerHTML = sectionHtml; }).catch(e => { const target = document.getElementById('adminLogSection'); if (target) target.innerHTML = '操作日志加载失败，不影响其他后台功能。'; });
                 loadNotifyConfigIntoForm();
@@ -2002,11 +2028,48 @@ body {
         const config = configs[type];
         if (!config) { target.innerHTML = '<div style="color:#c00;padding:12px;">未知分类</div>'; return; }
         try {
-            const { data, error } = await sb.from(config.table).select(config.cols).order('created_at', { ascending: false }).limit(ADMIN_LIMIT);
+            const { data, error } = await sb.from(config.table).select(config.cols).is('deleted_at', null).order('created_at', { ascending: false }).limit(ADMIN_LIMIT);
             if (error) throw error;
             const headerHtml = config.headers.map(h => `<th>${h}</th>`).join('');
             target.innerHTML = `<h3>${config.title} (${data ? data.length : 0}条，最多显示${ADMIN_LIMIT}条)</h3><div style="overflow-x:auto;"><table class="data-table"><thead><tr>${headerHtml}</tr></thead><tbody>${renderAdminRows(type, data || [])}</tbody></table></div>`;
         } catch (e) { target.innerHTML = `<div style="color:#c00;padding:12px;">加载失败：${escapeHtml(e.message || String(e))}</div>`; }
+    }
+    function fmtTrashTime(t) { try { return t ? new Date(t).toLocaleString() : ''; } catch (e) { return t || ''; } }
+    async function loadTrashSection() {
+        const target = document.getElementById('adminTrashSection');
+        if (!target) return;
+        const res = await trashApi('list');
+        const items = res.items || [];
+        if (!items.length) { target.innerHTML = '<h3>🗑️ 回收站</h3><div style="color:#888;padding:8px 0;">回收站是空的～删除的内容会出现在这里，可恢复或彻底删除。</div>'; return; }
+        let html = '<h3>🗑️ 回收站（' + items.length + ' 条，永久保留）</h3><div style="display:flex;flex-direction:column;gap:10px;">';
+        items.forEach(function(it) {
+            let media = '';
+            (it.media || []).forEach(function(m) {
+                if (m.isVideo) media += '<video controls preload="none" src="' + m.trashUrl + '" style="max-width:140px;max-height:140px;border-radius:8px;margin:4px 6px 4px 0;background:#000;"></video>';
+                else media += '<img src="' + m.trashUrl + '" loading="lazy" style="max-width:140px;max-height:140px;border-radius:8px;margin:4px 6px 4px 0;object-fit:cover;" />';
+            });
+            html += '<div class="admin-section" style="border:1px solid #f3c0cb;margin:0;">'
+                + '<div style="font-weight:600;">[' + escapeHtml(it.type) + '] ' + escapeHtml(it.title || '(无文字内容)') + '</div>'
+                + '<div style="color:#999;font-size:12px;margin:4px 0;">作者：' + escapeHtml(it.author || '') + '　删除人：' + escapeHtml(it.deleted_by || '') + '　' + fmtTrashTime(it.deleted_at) + '</div>'
+                + (media ? '<div style="display:flex;flex-wrap:wrap;">' + media + '</div>' : '')
+                + '<div style="margin-top:6px;display:flex;gap:8px;flex-wrap:wrap;">'
+                + '<button class="admin-btn" onclick="trashRestore(\'' + it.table + '\',\'' + it.id + '\')">♻️ 恢复</button>'
+                + '<button class="admin-btn danger" onclick="trashPurge(\'' + it.table + '\',\'' + it.id + '\')">🔥 彻底删除</button>'
+                + '</div></div>';
+        });
+        html += '</div>';
+        target.innerHTML = html;
+    }
+    async function trashRestore(table, id) {
+        if (!confirm('恢复这条内容吗？\n图片/视频将移回原位，内容重新显示。')) return;
+        try { await trashApi('restore', table, id); toast('✅ 已恢复', 'success'); await loadTrashSection(); renderAdminData(); }
+        catch (e) { toast('❌ 恢复失败：' + (e.message || e), 'error'); }
+    }
+    async function trashPurge(table, id) {
+        if (!confirm('⚠️ 彻底删除后不可恢复！')) return;
+        if (!confirm('最后确认：永久删除这条内容及其图片/视频？')) return;
+        try { await trashApi('purge', table, id); toast('✅ 已彻底删除', 'success'); await loadTrashSection(); }
+        catch (e) { toast('❌ 彻底删除失败：' + (e.message || e), 'error'); }
     }
     async function renderAdminLogSection() {
         const logs = await getAdminLogs();
@@ -2046,12 +2109,13 @@ body {
         renderAdminData();
     }
     async function adminDelete(type, id) {
-        if (!confirm('确定要删除这条数据吗？')) return;
+        if (!confirm('确定删除这条内容吗？
+删除后进入「回收站」，可恢复或彻底删除。')) return;
         try {
             const tableMap = { 'feed': 'feeds', 'message': 'messages', 'love': 'loves', 'memory': 'memories', 'memo': 'memos', 'schedule': 'schedules', 'countdown': 'countdowns', 'marker': 'travel_markers' };
             const table = tableMap[type];
             if (!table) { alert('未知类型'); return; }
-            await sb.from(table).delete().eq('id', id);
+            await trashApi('delete', table, id);
             logAction('admin_delete', { type, id });
             renderAdminData();
         } catch (e) { alert('删除失败: ' + e.message); }
