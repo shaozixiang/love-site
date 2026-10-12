@@ -388,7 +388,12 @@ body{background:var(--bg);color:var(--ink);}
 .comment-item{color:var(--ink);}
 .comment-item strong{color:var(--pink);}
 .reply-row input{background:#f1f1f4;border:1px solid transparent;border-radius:999px;}
+
 .reply-row button{background:var(--pink-soft);color:var(--pink);}
+/* 文件选择：隐藏粗糙原生控件，做成浅色胶囊按钮（保留 input 与 change 逻辑） */
+input[type=file]{font-size:13px;color:var(--sub);background:var(--pink-soft);border-radius:12px;padding:9px 10px;width:100%;}
+input[type=file]::file-selector-button{background:#fff;color:var(--pink);border:1px solid rgba(255,45,85,.35);border-radius:999px;padding:7px 16px;font-weight:600;margin-right:10px;cursor:pointer;font-size:13px;}
+input[type=file]::-webkit-file-upload-button{background:#fff;color:var(--pink);border:1px solid rgba(255,45,85,.35);border-radius:999px;padding:7px 16px;font-weight:600;margin-right:10px;cursor:pointer;font-size:13px;}
     </style>
 <body>
     <!-- 解锁门 -->
