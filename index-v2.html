@@ -301,6 +301,94 @@ body {
     .adm-empty { text-align: center; color: #aaa; padding: 40px 20px; font-size: 14px; }
     .adm-loading { color: #ff8fa3; text-align: center; padding: 30px; font-size: 14px; }
     @media (max-width: 480px) { .adm-topbar-title { font-size: 15px; } .adm-top-btn { padding: 6px 10px; font-size: 12px; } }
+
+/* ============================================================
+   iOS 原生简约 · 樱花粉点缀（样板：门禁/登录/外壳/留言）
+   只改视觉与手感，不改任何功能；粉色仅用于强调与爱心
+   ============================================================ */
+:root{
+  --pink:#ff2d55; --pink2:#ff5e7e; --pink-soft:#fff1f4;
+  --ink:#1c1c1e; --sub:#8e8e93; --sub2:#b0b0b6;
+  --bg:#f2f2f7; --card:#ffffff; --line:rgba(60,60,67,.12);
+  --r:15px; --shadow:0 1px 2px rgba(0,0,0,.05),0 2px 8px rgba(0,0,0,.035);
+}
+html,body{font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text","SF Pro Display","PingFang SC","Segoe UI",sans-serif;}
+body{background:var(--bg);color:var(--ink);}
+.bg-text{color:var(--pink);opacity:.05;}
+
+/* 爱心门禁：米白柔光，气泡白底粉字更轻盈 */
+.bubble-layer{background:linear-gradient(165deg,#ffffff 0%,#fff6f8 45%,#ffedf2 100%);}
+.bubble-tip{color:var(--pink);font-weight:700;letter-spacing:.5px;text-shadow:none;}
+.bubble-count{background:rgba(255,255,255,.88);color:var(--pink);border:1px solid rgba(255,45,85,.15);box-shadow:0 4px 18px rgba(255,45,85,.10);}
+.bubble{background:#fff;color:var(--pink);border:1.5px solid rgba(255,45,85,.28);box-shadow:0 8px 24px rgba(255,45,85,.16);font-weight:600;}
+.bubble:active{background:var(--pink);color:#fff;}
+.gate-badge{background:rgba(255,255,255,.78);color:var(--pink2);border:1px solid rgba(255,45,85,.12);}
+
+/* 登录页 */
+.login-container{background:linear-gradient(165deg,#ffffff 0%,#fff6f8 60%,#ffedf2 100%);}
+.login-box{background:rgba(255,255,255,.82);backdrop-filter:blur(24px);-webkit-backdrop-filter:blur(24px);border:1px solid rgba(255,255,255,.65);border-radius:22px;box-shadow:0 18px 50px rgba(255,45,85,.12);}
+.login-box h2{color:var(--ink);font-weight:700;letter-spacing:.3px;}
+.login-sub{color:var(--sub);}
+.login-input{background:#f1f1f4;border:1.5px solid transparent;border-radius:12px;}
+.login-input:focus{border-color:var(--pink);background:#fff;}
+.login-btn{background:var(--pink);border-radius:14px;box-shadow:0 6px 18px rgba(255,45,85,.28);font-weight:600;}
+.login-btn:active{opacity:.85;}
+.login-btn:disabled{background:#ffc4d1;box-shadow:none;}
+.login-version{color:var(--sub2);}
+
+/* 顶部：iOS 大标题毛玻璃导航栏（替换大粉块） */
+.hero{background:rgba(255,255,255,.72);backdrop-filter:saturate(180%) blur(20px);-webkit-backdrop-filter:saturate(180%) blur(20px);border-radius:0;padding:16px 20px 12px;text-align:left;box-shadow:none;border-bottom:.5px solid var(--line);}
+.hero::before,.hero::after{display:none;}
+.hero-badge{display:none;}
+.hero-title{font-size:27px;font-weight:800;color:var(--ink);letter-spacing:-.3px;text-shadow:none;}
+.hero-days{margin-top:8px;background:var(--pink-soft);color:var(--pink);box-shadow:none;font-weight:600;font-size:13px;padding:5px 14px;}
+
+/* 用户信息条 */
+.user-bar{background:transparent;backdrop-filter:none;box-shadow:none;margin:10px 16px 4px;padding:6px 4px;}
+.avatar-img{border:2px solid #fff;box-shadow:0 0 0 1.5px rgba(255,45,85,.35);}
+.user-name{color:var(--ink);font-weight:700;}
+.online-status{color:var(--sub);}
+.gear-btn{background:#e9e9eb;color:#4a4a4f;}
+.bubble-fab{background:var(--pink);box-shadow:0 4px 14px rgba(255,45,85,.32);}
+.dropdown-menu{border-radius:14px;box-shadow:0 12px 40px rgba(0,0,0,.14);}
+.dropdown-menu button{padding:13px 18px;font-size:14px;color:var(--ink);}
+.dropdown-menu button:hover{background:var(--pink-soft);color:var(--pink);}
+
+/* 底部毛玻璃 Tab Bar（图标上、文字下，超出横滑） */
+.tab-nav{position:fixed;left:0;right:0;bottom:0;max-width:640px;margin:0 auto;gap:2px;padding:6px 6px calc(8px + env(safe-area-inset-bottom));background:rgba(249,249,249,.82);backdrop-filter:saturate(180%) blur(20px);-webkit-backdrop-filter:saturate(180%) blur(20px);border-top:.5px solid var(--line);}
+.tab-btn{flex:0 0 auto;min-width:63px;display:flex;flex-direction:column;align-items:center;gap:2px;padding:6px 2px 4px;background:transparent;border:none;border-radius:12px;color:var(--sub);font-weight:500;box-shadow:none;}
+.tab-btn .ticon{font-size:20px;line-height:1.15;filter:grayscale(18%);}
+.tab-btn .tlabel{font-size:10.5px;letter-spacing:.2px;}
+.tab-btn.active{background:transparent;color:var(--pink);box-shadow:none;}
+.tab-btn.active .ticon{filter:none;}
+.main-container{padding-bottom:102px;}
+
+/* 分组卡片与通用控件 */
+.section{padding:0 14px 20px;}
+.card{background:var(--card);border-radius:var(--r);box-shadow:var(--shadow);padding:16px;margin-bottom:14px;}
+.section-title{color:var(--ink);font-size:19px;font-weight:800;letter-spacing:-.2px;}
+.common-input,.common-textarea{background:#f1f1f4;border:1.5px solid transparent;border-radius:12px;}
+.common-input:focus,.common-textarea:focus{border-color:var(--pink);background:#fff;}
+.submit-btn{background:var(--pink);border-radius:13px;font-weight:600;box-shadow:0 4px 12px rgba(255,45,85,.22);}
+.submit-btn:active{opacity:.88;}
+.submit-btn.ghost{background:#f1f1f4;color:var(--pink);border:none;box-shadow:none;}
+.empty-tip{color:var(--sub2);}
+
+/* 留言列表：iOS 分组卡片，去掉彩色左边条 */
+.list-card{background:var(--card);border-radius:var(--r);box-shadow:var(--shadow);border-left:none;padding:15px 16px;margin-bottom:12px;color:var(--ink);line-height:1.6;font-size:15px;}
+.list-card .meta{color:var(--sub);}
+.list-card .who{color:var(--ink);font-weight:600;font-size:13px;}
+.msg-photo{border-radius:12px;}
+.feed-actions{border-top:1px solid var(--line) !important;}
+.like-btn{background:#f1f1f4;border:none;color:#4a4a4f;padding:6px 14px;}
+.like-btn.liked{background:var(--pink);color:#fff;}
+.like-users{color:var(--sub);}
+.like-tag{background:var(--pink-soft);color:var(--pink);}
+.like-count{color:var(--pink);}
+.comment-item{color:var(--ink);}
+.comment-item strong{color:var(--pink);}
+.reply-row input{background:#f1f1f4;border:1px solid transparent;border-radius:999px;}
+.reply-row button{background:var(--pink-soft);color:var(--pink);}
     </style>
 <body>
     <!-- 解锁门 -->
@@ -402,14 +490,14 @@ body {
 
         <!-- 导航 -->
         <nav class="tab-nav">
-            <button class="tab-btn active" data-section="message">💬 留言</button>
-            <button class="tab-btn" data-section="gallery">📸 相册</button>
-            <button class="tab-btn" data-section="memory">✨ 回忆</button>
-            <button class="tab-btn" data-section="love">💌 感动</button>
-            <button class="tab-btn" data-section="memo">📋 待办</button>
-            <button class="tab-btn" data-section="todo">📝 行程</button>
-            <button class="tab-btn" data-section="angry">😠 生气</button>
-            <button class="tab-btn" data-section="travel">🗺️ 地图</button>
+            <button class="tab-btn active" data-section="message"><span class="ticon">💬</span><span class="tlabel">留言</span></button>
+            <button class="tab-btn" data-section="gallery"><span class="ticon">📸</span><span class="tlabel">相册</span></button>
+            <button class="tab-btn" data-section="memory"><span class="ticon">✨</span><span class="tlabel">回忆</span></button>
+            <button class="tab-btn" data-section="love"><span class="ticon">💌</span><span class="tlabel">感动</span></button>
+            <button class="tab-btn" data-section="memo"><span class="ticon">📋</span><span class="tlabel">待办</span></button>
+            <button class="tab-btn" data-section="todo"><span class="ticon">📝</span><span class="tlabel">行程</span></button>
+            <button class="tab-btn" data-section="angry"><span class="ticon">😠</span><span class="tlabel">生气</span></button>
+            <button class="tab-btn" data-section="travel"><span class="ticon">🗺️</span><span class="tlabel">地图</span></button>
         </nav>
 
         <!-- 留言板 -->
