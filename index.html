@@ -521,6 +521,122 @@
         .toggle-switch::after { content: ""; width: 20px; height: 20px; background: white; border-radius: 50%; position: absolute; top: 2px; left: 2px; transition: 0.2s; }
         .toggle-switch.active::after { left: 22px; }
         .interval-input { width: 80px; padding: 5px; border-radius: 30px; border: 1px solid #ffb7c5; text-align: center; }
+
+/* ============================================================
+   iOS 原生简约 · 樱花粉点缀（与优化版同风格，仅视觉覆盖层）
+   ============================================================ */
+:root{
+  --pink:#ff2d55; --pink2:#ff5e7e; --pink-soft:#fff1f4;
+  --ink:#1c1c1e; --sub:#8e8e93; --sub2:#b0b0b6;
+  --bg:#f2f2f7; --card:#ffffff; --line:rgba(60,60,67,.12);
+  --r:16px; --shadow:0 1px 2px rgba(0,0,0,.05),0 2px 8px rgba(0,0,0,.035);
+}
+*{ -webkit-tap-highlight-color:transparent; }
+html,body{font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text","SF Pro Display","PingFang SC","Segoe UI",sans-serif;}
+body{background:var(--bg);color:var(--ink);}
+.bg-text{color:var(--pink);opacity:.05;}
+.heart-float{color:var(--pink);}
+.danmaku{color:var(--pink);text-shadow:0 2px 6px rgba(255,255,255,.8);}
+
+/* 门禁 / 登录（橙粉渐变改米白柔光） */
+.bubble-layer{background:linear-gradient(165deg,#ffffff 0%,#fff6f8 45%,#ffedf2 100%);}
+.bubble-tip{color:var(--pink);font-weight:700;}
+.bubble-count{background:rgba(255,255,255,.88);padding:6px 18px;border-radius:999px;border:1px solid rgba(255,45,85,.15);box-shadow:0 4px 18px rgba(255,45,85,.10);}
+.bubble{background:#fff;color:var(--pink);border:1.5px solid rgba(255,45,85,.28);box-shadow:0 8px 24px rgba(255,45,85,.16);font-weight:600;}
+.bubble:active{background:var(--pink);color:#fff;}
+.login-container{background:linear-gradient(165deg,#ffffff 0%,#fff6f8 60%,#ffedf2 100%);}
+.login-box{background:rgba(255,255,255,.82);backdrop-filter:blur(24px);-webkit-backdrop-filter:blur(24px);border:1px solid rgba(255,255,255,.65);box-shadow:0 18px 50px rgba(255,45,85,.12);}
+.login-box h2{color:var(--ink);font-weight:700;}
+.login-input{background:#f1f1f4;border:1.5px solid transparent;}
+.login-input:focus{border-color:var(--pink);background:#fff;}
+.login-btn{background:var(--pink);background-image:none;border-radius:14px;font-weight:600;box-shadow:0 6px 18px rgba(255,45,85,.28);}
+.login-btn:disabled{background:#ffc4d1;}
+
+/* 外壳 */
+.main-container{max-width:680px;padding-bottom:104px;}
+.header h1{color:var(--ink);font-weight:800;letter-spacing:-.3px;}
+.couple-days{background:var(--pink-soft);color:var(--pink);font-size:14px;font-weight:600;}
+.user-profile{background:rgba(255,255,255,.8);box-shadow:0 2px 10px rgba(0,0,0,.06);}
+.avatar-img{border:2px solid #fff;box-shadow:0 0 0 1.5px rgba(255,45,85,.35);background:#ffe5e9;}
+.user-name{color:var(--ink);}
+.gear-btn{background:#e9e9eb;color:#4a4a4f;}
+.settings-bubble-btn{background:var(--pink);border:1px solid transparent;color:#fff;box-shadow:0 4px 14px rgba(255,45,85,.32);}
+.dropdown-menu{border-radius:14px;box-shadow:0 12px 40px rgba(0,0,0,.14);}
+.dropdown-menu button{color:var(--ink);}
+.dropdown-menu button:hover{background:var(--pink-soft);color:var(--pink);}
+
+/* 底部毛玻璃 Tab Bar */
+.nav{position:fixed;left:0;right:0;bottom:0;max-width:680px;margin:0 auto;flex-wrap:nowrap;justify-content:flex-start;gap:2px;overflow-x:auto;scrollbar-width:none;-webkit-overflow-scrolling:touch;
+  padding:6px 6px calc(8px + env(safe-area-inset-bottom));margin-bottom:0;background:rgba(249,249,249,.82);
+  backdrop-filter:saturate(180%) blur(20px);-webkit-backdrop-filter:saturate(180%) blur(20px);border-top:.5px solid var(--line);}
+.nav::-webkit-scrollbar{display:none;}
+.nav-btn{flex:0 0 auto;min-width:63px;display:flex;flex-direction:column;align-items:center;gap:2px;padding:6px 2px 4px;background:transparent;border:none;border-radius:12px;color:var(--sub);font-weight:500;box-shadow:none;white-space:nowrap;}
+.nav-btn .ticon{font-size:20px;line-height:1.15;filter:grayscale(18%);}
+.nav-btn .tlabel{font-size:10.5px;letter-spacing:.2px;}
+.nav-btn.active,.nav-btn:hover{background:transparent;color:var(--pink);}
+.nav-btn.active .ticon{filter:none;}
+
+/* 板块白卡 + 控件 */
+.section{background:var(--card);border-radius:var(--r);box-shadow:var(--shadow);padding:18px;}
+.section h3{color:var(--ink);font-size:19px;font-weight:800;letter-spacing:-.2px;}
+.common-input,.common-textarea{background:#f1f1f4;border:1.5px solid transparent;border-radius:12px;}
+.common-input:focus,.common-textarea:focus{border-color:var(--pink);background:#fff;outline:none;}
+.submit-btn{background:var(--pink);background-image:none;border-radius:13px;font-weight:600;box-shadow:0 4px 12px rgba(255,45,85,.22);}
+.submit-btn:disabled{background:#ffc4d1;}
+.section input[type=text],.section input[type=date],.section input[type=number],.section input[type=password],.section select{background:#f1f1f4 !important;border:1.5px solid transparent !important;border-radius:12px !important;color:var(--ink);}
+.section input:focus,.section select:focus{border-color:var(--pink) !important;background:#fff !important;outline:none;}
+.section input[type=file]{font-size:13px;color:var(--sub);background:var(--pink-soft);border-radius:12px;padding:9px 10px;width:100%;}
+.section input[type=file]::file-selector-button{background:#fff;color:var(--pink);border:1px solid rgba(255,45,85,.35);border-radius:999px;padding:7px 16px;font-weight:600;margin-right:10px;cursor:pointer;font-size:13px;}
+.section input[type=file]::-webkit-file-upload-button{background:#fff;color:var(--pink);border:1px solid rgba(255,45,85,.35);border-radius:999px;padding:7px 16px;font-weight:600;margin-right:10px;cursor:pointer;font-size:13px;}
+.radio-group input[type=radio]{accent-color:var(--pink);width:17px;height:17px;}
+.section [style*="dashed"]{background:var(--pink-soft) !important;border:1.5px dashed rgba(255,45,85,.32) !important;border-radius:14px !important;color:var(--pink) !important;}
+
+/* 列表卡片 */
+.card-item{background:var(--card);border-left:none;border-radius:14px;box-shadow:var(--shadow);color:var(--ink);line-height:1.6;}
+.card-meta{color:var(--sub);}
+
+/* 相册 feed */
+.feed-item{background:var(--card);border-radius:16px;box-shadow:var(--shadow);}
+.feed-header{border-bottom:1px solid var(--line);}
+.feed-author{color:var(--ink);}
+.feed-time{color:var(--sub);}
+.feed-desc{color:var(--ink);}
+.feed-media-item{background:#f1f1f4;border-radius:10px;}
+.feed-comments{background:#fff;border-top:1px solid var(--line);}
+.comment-item{color:var(--ink);}
+.reply-input input{background:#f1f1f4;border:1px solid transparent;}
+.like-section{background:#fff;border-top:1px solid var(--line);}
+.like-btn{background:#f1f1f4;border:1.5px solid transparent;color:#4a4a4f;}
+.like-btn:hover{background:var(--pink);color:#fff;border-color:transparent;transform:none;}
+.like-btn.liked{background:var(--pink);background-image:none;color:#fff;border-color:transparent;}
+.like-users{color:var(--sub);}
+.like-user-tag{background:var(--pink-soft);color:var(--pink);}
+.like-count{color:var(--pink);background:var(--pink-soft);border:1px solid transparent;}
+.preview-img{border:1.5px solid var(--line);border-radius:10px;}
+
+/* 行程 / 纪念 / 地图 */
+.schedule-item{background:var(--card);border-left:none;box-shadow:var(--shadow);}
+.schedule-date{color:var(--pink);}
+.countdown-item{background:var(--card);box-shadow:var(--shadow);}
+.private-badge{background:#fff3dc;color:#c77c0a;}
+.map-container{border:1px solid var(--line);border-radius:14px;}
+.map-marker-item{background:var(--card);box-shadow:var(--shadow);}
+
+/* 弹窗 */
+.modal-card{border-radius:20px;box-shadow:0 20px 60px rgba(0,0,0,.20);}
+.modal-card h3{color:var(--ink);}
+.modal-card input{background:#f1f1f4;border:1.5px solid transparent;}
+.modal-card input:focus{border-color:var(--pink);background:#fff;outline:none;}
+.close-modal{color:var(--sub);}
+.angry-box{border-radius:20px;}
+.angry-textarea{background:#f1f1f4;border:1.5px solid transparent;}
+.angry-textarea:focus{border-color:var(--pink);background:#fff;outline:none;}
+.bubble-settings-card{border-radius:20px;}
+.toggle-switch.active{background:var(--pink);}
+.interval-input{background:#f1f1f4;border:1.5px solid transparent;}
+.preview-item{border:1.5px solid var(--line);border-radius:12px;}
+.nav-arrow{background:rgba(255,255,255,.14);border:1px solid rgba(255,255,255,.22);}
+.nav-arrow:hover{background:rgba(255,255,255,.28);}
     </style>
     <link rel="stylesheet" href="/lib/leaflet.css?v=20261011a">
     <script defer src="/lib/leaflet.js?v=20261011a"></script>
@@ -612,14 +728,14 @@
         <div class="settings-bubble-btn" id="openBubbleSettingsBtn">🎈</div>
         <div class="header"><h1>💖 我们的专属小站 💖</h1><div class="couple-days" id="togetherDaysDisplay"></div></div>
         <div class="nav">
-            <button class="nav-btn active" data-section="message">💬 留言板</button>
-            <button class="nav-btn" data-section="gallery">📸 时光相册</button>
-            <button class="nav-btn" data-section="memory">✨ 一起做过的事</button>
-            <button class="nav-btn" data-section="love">💌 感动的话</button>
-            <button class="nav-btn" data-section="memo">📋 待办备忘录</button>
-            <button class="nav-btn" data-section="todo">📝 行程/纪念日</button>
-            <button class="nav-btn" data-section="angry">😠 生气模式</button>
-            <button class="nav-btn" data-section="travel">🗺️ 旅行地图</button>
+            <button class="nav-btn active" data-section="message"><span class="ticon">💬</span><span class="tlabel">留言</span></button>
+            <button class="nav-btn" data-section="gallery"><span class="ticon">📸</span><span class="tlabel">相册</span></button>
+            <button class="nav-btn" data-section="memory"><span class="ticon">✨</span><span class="tlabel">回忆</span></button>
+            <button class="nav-btn" data-section="love"><span class="ticon">💌</span><span class="tlabel">感动</span></button>
+            <button class="nav-btn" data-section="memo"><span class="ticon">📋</span><span class="tlabel">待办</span></button>
+            <button class="nav-btn" data-section="todo"><span class="ticon">📝</span><span class="tlabel">行程</span></button>
+            <button class="nav-btn" data-section="angry"><span class="ticon">😠</span><span class="tlabel">生气</span></button>
+            <button class="nav-btn" data-section="travel"><span class="ticon">🗺️</span><span class="tlabel">地图</span></button>
         </div>
         <div class="section active" id="messageSection"><h3>💬 给TA的悄悄话</h3><textarea class="common-textarea" id="messageInput" placeholder="想对TA说什么..."></textarea><input type="file" id="messagePhotoInput" accept="image/*" style="margin-bottom:10px;"><div id="messagePhotoPreview" style="margin-bottom:10px;"></div><button class="submit-btn" id="msgSubmitBtn" onclick="addMessageWithPhoto()">发送留言</button><div id="messageList"></div></div>
         <div class="section" id="gallerySection"><h3>📸 时光相册 · 朋友圈模式</h3><div style="border:2px dashed #ffd1d8; border-radius:15px; padding:20px; text-align:center; cursor:pointer; margin-bottom:20px;" onclick="document.getElementById('fileInput').click()">📷 点击选择照片/视频（可多选）<input type="file" id="fileInput" accept="image/*,video/*" multiple style="display:none"></div><div id="selectedFilesPreview" class="preview-images"></div><div style="margin-bottom:15px;"><textarea id="feedDesc" class="common-textarea" placeholder="写一段描述... (选填)"></textarea></div><button class="submit-btn" id="feedSubmitBtn" onclick="uploadFeed()">📤 发送动态</button><div id="galleryContainer" style="margin-top:20px;"></div></div>
