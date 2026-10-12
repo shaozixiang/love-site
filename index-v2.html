@@ -394,6 +394,75 @@ body{background:var(--bg);color:var(--ink);}
 input[type=file]{font-size:13px;color:var(--sub);background:var(--pink-soft);border-radius:12px;padding:9px 10px;width:100%;}
 input[type=file]::file-selector-button{background:#fff;color:var(--pink);border:1px solid rgba(255,45,85,.35);border-radius:999px;padding:7px 16px;font-weight:600;margin-right:10px;cursor:pointer;font-size:13px;}
 input[type=file]::-webkit-file-upload-button{background:#fff;color:var(--pink);border:1px solid rgba(255,45,85,.35);border-radius:999px;padding:7px 16px;font-weight:600;margin-right:10px;cursor:pointer;font-size:13px;}
+
+/* ============================================================
+   iOS 风铺满：相册/回忆/感动/待办/行程/生气/地图 + 全部弹窗
+   ============================================================ */
+/* 板块内裸输入框（HTML 内联粉边框）统一收口为 iOS 灰底 */
+.section input[type=text],.section input[type=date],.section input[type=number],.section input[type=password],.section select{
+  background:#f1f1f4 !important; border:1.5px solid transparent !important; border-radius:12px !important; color:var(--ink);}
+.section input:focus,.section select:focus{ border-color:var(--pink) !important; background:#fff !important; outline:none;}
+.radio-group input[type=radio]{ accent-color:var(--pink); width:17px; height:17px; }
+
+/* 相册：朋友圈卡片 */
+.upload-zone{background:var(--pink-soft) !important;border:1.5px dashed rgba(255,45,85,.32) !important;border-radius:14px !important;color:var(--pink) !important;transition:background .2s;}
+.upload-zone:active{background:#ffe4ea !important;}
+.feed-card{background:var(--card);border-radius:var(--r);box-shadow:var(--shadow);margin-bottom:14px;}
+.feed-avatar{background:var(--pink);}
+.feed-author{color:var(--ink);}
+.feed-time{color:var(--sub);}
+.feed-desc{color:var(--ink);}
+.feed-grid{gap:4px;padding:0 12px 6px;}
+.grid-cell{border-radius:10px;background:#f1f1f4;}
+.grid-cell.single{border-radius:12px;}
+.feed-actions{border-top:1px solid var(--line);}
+.feed-comments{padding:0 16px 12px;}
+
+/* 行程 / 纪念日：白卡去粉底 */
+.schedule-item{background:var(--card);border-left:none;border-radius:14px;box-shadow:var(--shadow);}
+.schedule-date{color:var(--pink);}
+.countdown-item{background:var(--card);border-radius:14px;box-shadow:var(--shadow);}
+.countdown-status{color:var(--pink);}
+.memo-row input[type=checkbox]{accent-color:var(--pink);}
+.priority-dot{font-weight:600;}
+.p-normal{background:#e9e9eb;color:#6d6d72;}
+.p-important{background:#fff3dc;color:#c77c0a;}
+.p-urgent{background:#ffdfe6;color:var(--pink);}
+.private-badge{background:#fff3dc;color:#c77c0a;}
+#angryStatus{background:#f1f1f4 !important;color:var(--ink) !important;border-radius:12px;}
+
+/* 地图 */
+.map-container{border:1px solid var(--line);border-radius:14px;}
+.map-marker-item{border-radius:14px;box-shadow:var(--shadow);}
+
+/* 生气道歉框 */
+.angry-box{border-radius:20px;}
+.angry-box h3{color:var(--ink) !important;}
+.angry-textarea{background:#f1f1f4;border:1.5px solid transparent;border-radius:12px;}
+.angry-textarea:focus{border-color:var(--pink);background:#fff;outline:none;}
+
+/* 通用弹窗（头像/密码/邮箱/注册） */
+.modal-card{border-radius:20px;box-shadow:0 20px 60px rgba(0,0,0,.20);}
+.modal-card h3{color:var(--ink);}
+.modal-card input{background:#f1f1f4;border:1.5px solid transparent;border-radius:12px;}
+.modal-card input:focus{border-color:var(--pink);background:#fff;outline:none;}
+.close-modal{color:var(--sub);}
+.download-btn{background:var(--pink);border-radius:999px;font-weight:600;box-shadow:0 4px 14px rgba(255,45,85,.3);}
+.nav-arrow{background:rgba(255,255,255,.14);border:1px solid rgba(255,255,255,.22);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);}
+.modal-content img,.modal-content video{border-radius:14px;}
+
+/* 梦幻气泡设置弹窗 */
+.bubble-settings-card{border-radius:20px;}
+.bubble-settings-card h3{color:var(--ink) !important;}
+.bubble-settings-card [style*="dashed"]{background:var(--pink-soft) !important;border:1.5px dashed rgba(255,45,85,.32) !important;border-radius:14px !important;color:var(--pink) !important;}
+.toggle-switch.active{background:var(--pink);}
+.interval-input{background:#f1f1f4;border:1.5px solid transparent;border-radius:999px;}
+.preview-item{border:1.5px solid var(--line);border-radius:12px;}
+
+/* 杂项 */
+.footer-tag{color:var(--sub2);}
+.avatar-xs{border:1px solid var(--line);}
+.danmaku{color:var(--pink);}
     </style>
 <body>
     <!-- 解锁门 -->
