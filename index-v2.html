@@ -7,7 +7,7 @@
     <link rel="stylesheet" href="/lib/leaflet.css?v=20261011a">
     <script defer src="/lib/leaflet.js?v=20261011a"></script>
     <script defer src="/lib/supabase-v2.js?v=20261011a"></script>
-    <script defer src="/lib/app-v2.js?v=20261011a"></script>
+    <script defer src="/lib/app-v2.js?v=20261014a"></script>
 
     <style>
 /* ===== 专属优化版 · 全新浪漫设计（移动端优先） ===== */
@@ -463,6 +463,12 @@ input[type=file]::-webkit-file-upload-button{background:#fff;color:var(--pink);b
 .footer-tag{color:var(--sub2);}
 .avatar-xs{border:1px solid var(--line);}
 .danmaku{color:var(--pink);}
+
+/* 前端管理员「对外隐藏/恢复」按钮（仅管理员可见） */
+.vis-btn{display:inline-flex;align-items:center;gap:2px;background:#e9e9eb;color:#4a4a4f;border:none;border-radius:999px;padding:5px 11px;font-size:12px;font-weight:600;cursor:pointer;margin-left:6px;line-height:1.4;}
+.vis-btn:active{opacity:.82;}
+.vis-btn.is-hidden{background:#fff3dc;color:#c77c0a;}
+.vis-badge{display:inline-block;background:#fff3dc;color:#c77c0a;border-radius:999px;padding:4px 10px;font-size:11px;font-weight:600;margin-left:6px;}
     </style>
 <body>
     <!-- 解锁门 -->

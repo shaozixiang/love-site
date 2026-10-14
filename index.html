@@ -637,11 +637,17 @@ body{background:var(--bg);color:var(--ink);}
 .preview-item{border:1.5px solid var(--line);border-radius:12px;}
 .nav-arrow{background:rgba(255,255,255,.14);border:1px solid rgba(255,255,255,.22);}
 .nav-arrow:hover{background:rgba(255,255,255,.28);}
+
+/* 前端管理员「对外隐藏/恢复」按钮（仅管理员可见） */
+.vis-btn{display:inline-flex;align-items:center;gap:2px;background:#e9e9eb;color:#4a4a4f;border:none;border-radius:999px;padding:5px 11px;font-size:12px;font-weight:600;cursor:pointer;margin-left:6px;line-height:1.4;}
+.vis-btn:active{opacity:.82;}
+.vis-btn.is-hidden{background:#fff3dc;color:#c77c0a;}
+.vis-badge{display:inline-block;background:#fff3dc;color:#c77c0a;border-radius:999px;padding:4px 10px;font-size:11px;font-weight:600;margin-left:6px;}
     </style>
     <link rel="stylesheet" href="/lib/leaflet.css?v=20261011a">
     <script defer src="/lib/leaflet.js?v=20261011a"></script>
     <script defer src="/lib/supabase.min.js?v=20261011a"></script>
-    <script defer src="/lib/app.js?v=20261011a"></script>
+    <script defer src="/lib/app.js?v=20261014a"></script>
 </head>
 <body>
     <div class="bubble-layer" id="bubbleLayer"><div class="bubble-tip">💖 点击10个爱心气泡，解锁我们的小站~</div><div class="bubble-count">已点击：<span id="bubbleCount">0</span> / 10</div></div>
