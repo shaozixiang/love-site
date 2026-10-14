@@ -1,0 +1,47 @@
+name: Supabase 保活（防止免费版闲置自动暂停）
+
+# Supabase 免费版项目约 7 天无访问会被自动暂停。
+# 本任务每 2 天自动访问一次数据库 REST 接口，重置闲置计时；
+# 即使 RLS 对外返回空结果或 401，只要请求到达数据库即算活动，足以保活。
+on:
+  schedule:
+    # GitHub Actions 用 UTC；04:00 UTC = 北京时间 12:00，每 2 天一次
+    - cron: '0 4 */2 * *'
+  workflow_dispatch: {}   # 允许在 Actions 页面手动触发测试
+
+jobs:
+  keepalive:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 访问 Supabase，重置闲置计时
+        env:
+          SUPABASE_URL: https://txeynuvttibnilvttieu.supabase.co
+          # publishable(anon) key 本就公开写在前端，RLS 才是安全边界，可放在此处
+          SUPABASE_ANON_KEY: sb_publishable_Z8E9qPbi6F2NLzoQh9fhfw__goWiZZ4
+        run: |
+          set -u
+          echo "[$(date -u)] 开始访问 Supabase ..."
+
+          # 1) PostgREST 查表 —— 会真实连接 Postgres 数据库，重置闲置计时
+          code=$(curl -s -o /tmp/rest.json -w "%{http_code}" \
+            -H "apikey: $SUPABASE_ANON_KEY" \
+            -H "Authorization: Bearer $SUPABASE_ANON_KEY" \
+            "$SUPABASE_URL/rest/v1/site_config?select=id&limit=1")
+          echo "REST /rest/v1/site_config 状态码: $code"
+          echo "响应内容: $(head -c 300 /tmp/rest.json)"
+
+          # 2) Auth 健康检查（附带，确保各服务在线）
+          curl -s "$SUPABASE_URL/auth/v1/health" || true
+          echo ""
+
+          # 只要服务有 HTTP 响应（200/204/401/403/404/空数组都表示服务在线、已收到访问），即保活成功
+          case "$code" in
+            200|201|204|401|403|404)
+              echo "✅ 已成功访问数据库，闲置计时已重置（无需手动恢复）"
+              ;;
+            *)
+              echo "::error::未获得预期 HTTP 响应（$code），请检查 Supabase 项目状态"
+              cat /tmp/rest.json
+              exit 1
+              ;;
+          esac
