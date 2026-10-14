@@ -23,15 +23,16 @@ jobs:
           echo "[$(date -u)] 开始访问 Supabase ..."
 
           # 1) PostgREST 查表 —— 会真实连接 Postgres 数据库，重置闲置计时
+          # site_config 表存在；RLS 对 anon 返回空数组(200)，但请求已真实查询数据库，足以保活
           code=$(curl -s -o /tmp/rest.json -w "%{http_code}" \
             -H "apikey: $SUPABASE_ANON_KEY" \
             -H "Authorization: Bearer $SUPABASE_ANON_KEY" \
-            "$SUPABASE_URL/rest/v1/site_config?select=id&limit=1")
+            "$SUPABASE_URL/rest/v1/site_config?limit=1")
           echo "REST /rest/v1/site_config 状态码: $code"
           echo "响应内容: $(head -c 300 /tmp/rest.json)"
 
           # 2) Auth 健康检查（附带，确保各服务在线）
-          curl -s "$SUPABASE_URL/auth/v1/health" || true
+          curl -s -H "apikey: $SUPABASE_ANON_KEY" "$SUPABASE_URL/auth/v1/health" || true
           echo ""
 
           # 只要服务有 HTTP 响应（200/204/401/403/404/空数组都表示服务在线、已收到访问），即保活成功
