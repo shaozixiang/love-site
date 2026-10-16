@@ -15,18 +15,23 @@ const ALLOWED_PREFIXES = [
 export async function onRequest(context) {
   const { request, env } = context;
   const origin = request.headers.get('Origin') || '';
+  const aco = echoableOrigin(request, origin);
   if (request.method === 'OPTIONS') {
-    return new Response(null, { status: 204, headers: corsHeaders(origin) });
+    return new Response(null, { status: 204, headers: corsHeaders(aco) });
   }
   try {
     const config = getConfig(env);
     if (!config.ok) return jsonResponse({ error: config.error }, 500);
 
-    // 解析仓库内路径（去掉 /api/img 前缀，解码）
+    // 解析仓库内路径：仅解码一次，按“段”拆分，拒绝任何 . / .. / 反斜杠段，防路径穿越（H1）
     const url = new URL(request.url);
-    let rel = decodeURIComponent(url.pathname.replace(/^\/api\/img\/?/, ''));
-    if (!rel) return jsonResponse({ error: '缺少文件路径' }, 400);
-    if (rel.charAt(0) !== '/') rel = '/' + rel;
+    const decoded = decodeURIComponent(url.pathname.replace(/^\/api\/img\/?/, ''));
+    if (!decoded) return jsonResponse({ error: '缺少文件路径' }, 400);
+    const segs = decoded.split('/').filter(s => s !== '');
+    if (segs.length === 0 || segs.some(s => s === '.' || s === '..' || s.indexOf('\\') >= 0)) {
+      return jsonResponse({ error: '非法文件路径' }, 403);
+    }
+    const rel = '/' + segs.join('/');
     if (!ALLOWED_PREFIXES.some(p => rel.startsWith(p))) {
       return jsonResponse({ error: '该路径不允许访问' }, 403);
     }
@@ -40,7 +45,12 @@ export async function onRequest(context) {
     const cache = caches.default;
     const cacheKey = new Request(`https://img-cache.local/${rel}`);
     const cached = await cache.match(cacheKey);
-    if (cached) return new Response(cached.body, { status: 200, headers: cached.headers });
+    if (cached) {
+      const ch = new Headers(cached.headers);
+      ch.delete('Access-Control-Allow-Origin');
+      if (aco) ch.set('Access-Control-Allow-Origin', aco);
+      return new Response(cached.body, { status: 200, headers: ch });
+    }
 
     // 3. 回源 GitHub 私有仓库
     const owner = String(env.GITHUB_IMG_OWNER || '');
@@ -49,7 +59,8 @@ export async function onRequest(context) {
     const pat = String(env.GITHUB_IMG_TOKEN || '');
     if (!owner || !repo || !pat) return jsonResponse({ error: '图片服务未配置完整' }, 500);
 
-    const upstream = `https://api.github.com/repos/${owner}/${repo}/contents/${encodeURIComponent(rel).replace(/%2F/g, '/')}?ref=${encodeURIComponent(branch)}`;
+    const upstreamPath = segs.map(s => encodeURIComponent(s)).join('/');
+    const upstream = `https://api.github.com/repos/${owner}/${repo}/contents/${upstreamPath}?ref=${encodeURIComponent(branch)}`;
     const ghResp = await fetch(upstream, {
       headers: {
         Authorization: `Bearer ${pat}`,
@@ -70,7 +81,7 @@ export async function onRequest(context) {
         'Content-Type': contentType,
         'Content-Length': String(body.byteLength),
         'Cache-Control': 'public, max-age=31536000, immutable',
-        'Access-Control-Allow-Origin': origin || '*'
+        ...(aco ? { 'Access-Control-Allow-Origin': aco } : {})
       }
     });
     // 存入边缘缓存（最多 24 小时，由 CDN 容量决定）
@@ -133,9 +144,16 @@ function getConfig(env) {
   return { ok: true, sessionSecret };
 }
 
-function corsHeaders(origin) {
+// 仅回显同源 Origin（M3：不再对任意外域回显，避免外域页面跨域读取图片字节）
+function echoableOrigin(request, origin) {
+  if (!origin) return '';
+  try { return new URL(origin).host === new URL(request.url).host ? origin : ''; }
+  catch (e) { return ''; }
+}
+
+function corsHeaders(aco) {
   const headers = { 'Access-Control-Allow-Methods': 'GET, HEAD, OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type, X-Couple-Token', Vary: 'Origin' };
-  if (origin) headers['Access-Control-Allow-Origin'] = origin;
+  if (aco) headers['Access-Control-Allow-Origin'] = aco;
   return headers;
 }
 
