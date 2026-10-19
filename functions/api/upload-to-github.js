@@ -3,8 +3,8 @@ const ALLOWED_FOLDERS = new Set(['common', 'feeds', 'messages', 'bubbles', 'avat
 
 // 仅允许图片与视频（S3：杜绝 html/svg/js 等可执行/可脚本类型；svg 可内嵌脚本故排除）
 const ALLOWED_MIME = new Set([
-  'image/jpeg', 'image/png', 'image/gif', 'image/webp', 'image/heic',
-  'video/mp4', 'video/quicktime', 'video/webm'
+  'image/jpeg', 'image/png', 'image/gif', 'image/webp', 'image/heic', 'image/heif',
+  'video/mp4', 'video/quicktime', 'video/webm', 'video/3gpp'
 ]);
 const MIME_TO_EXT = {
   'image/jpeg': 'jpg',
@@ -12,11 +12,13 @@ const MIME_TO_EXT = {
   'image/gif': 'gif',
   'image/webp': 'webp',
   'image/heic': 'heic',
+  'image/heif': 'heic',
   'video/mp4': 'mp4',
   'video/webm': 'webm',
-  'video/quicktime': 'mov'
+  'video/quicktime': 'mov',
+  'video/3gpp': '3gp'
 };
-const ALLOWED_EXT = new Set(['jpg', 'jpeg', 'png', 'gif', 'webp', 'heic', 'mp4', 'mov', 'webm']);
+const ALLOWED_EXT = new Set(['jpg', 'jpeg', 'png', 'gif', 'webp', 'heic', 'heif', 'mp4', 'mov', 'webm', '3gp']);
 
 export async function onRequest(context) {
   const { request, env } = context;
@@ -65,11 +67,11 @@ export async function onRequest(context) {
     // 文件类型白名单（MIME 与扩展名双重校验）
     const mime = String(file.type || '').toLowerCase();
     if (mime && !ALLOWED_MIME.has(mime)) {
-      return jsonResponse({ error: '不支持的文件类型，只能上传图片或视频。' }, 400, headers);
+      return jsonResponse({ error: '不支持这个文件格式：请上传 jpg/png/gif/webp/heic 照片，或 mp4/mov/webm/3gp 视频。' }, 400, headers);
     }
     const extension = getExtension(file.name, mime);
     if (!extension) {
-      return jsonResponse({ error: '不支持的文件扩展名，仅允许 jpg/png/gif/webp/heic/mp4/mov/webm。' }, 400, headers);
+      return jsonResponse({ error: '无法识别这个文件的类型：请上传 jpg/png/gif/webp/heic 照片，或 mp4/mov/webm/3gp 视频。' }, 400, headers);
     }
 
     const folder = sanitizeFolder(formData.get('folder') || 'common');
