@@ -104,8 +104,12 @@ function guessContentType(rel) {
   const lower = String(rel).toLowerCase();
   const map = {
     '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.png': 'image/png', '.gif': 'image/gif',
-    '.webp': 'image/webp', '.bmp': 'image/bmp', '.svg': 'image/svg+xml', '.heic': 'image/heic',
-    '.mp4': 'video/mp4', '.mov': 'video/quicktime', '.webm': 'video/webm', '.avi': 'video/x-msvideo'
+    '.webp': 'image/webp', '.bmp': 'image/bmp', '.avif': 'image/avif',
+    '.heic': 'image/heic', '.heif': 'image/heif',
+    '.mp4': 'video/mp4', '.mov': 'video/quicktime', '.webm': 'video/webm',
+    '.3gp': 'video/3gpp', '.3g2': 'video/3gpp2', '.m4v': 'video/x-m4v',
+    '.avi': 'video/x-msvideo', '.mpeg': 'video/mpeg'
+    // 注意：不映射 .svg（svg 可内嵌脚本），万一误传也会以 octet-stream 下载而非执行
   };
   for (const ext in map) { if (lower.endsWith(ext)) return map[ext]; }
   return 'application/octet-stream';
