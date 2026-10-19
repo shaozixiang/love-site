@@ -240,7 +240,13 @@ function buildSafeSearch(url, table, method, username, isAdmin, isCouple) {
   }
 
   // 保留客户端已有 and 条件（与服务端条件为 AND，无法绕过；前端目前未使用）
-  params.getAll('and').forEach(v => { if (v) andParts.push(v); });
+  // 注意 supabase-js 生成的 and 值自带外层括号，需剥掉后再合并
+  params.getAll('and').forEach(v => {
+    if (!v) return;
+    let inner = String(v).trim();
+    if (inner.startsWith('(') && inner.endsWith(')')) inner = inner.slice(1, -1).trim();
+    if (inner) andParts.push(inner);
+  });
   params.delete('and');
   if (andParts.length) params.append('and', '(' + andParts.join(',') + ')');
 
