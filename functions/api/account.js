@@ -1,5 +1,7 @@
 const SESSION_TTL_SECONDS = 30 * 24 * 60 * 60;
 const PASSWORD_MIN_LENGTH = 4;
+// 事件通知实例级限流表（同发布者同类型 30 秒内最多 1 封）
+const NOTIFY_RATE = new Map();
 const USER_COLUMNS = 'username,password,password_hash,password_salt,avatar,permission,role,last_active,is_online';
 const PUBLIC_USER_COLUMNS = 'username,avatar,permission,role,last_active,is_online';
 
@@ -49,7 +51,10 @@ async function handleAction(config, body) {
   if (action === 'onlineStatus') return onlineStatus(config, session.username);
   if (action === 'setMyEmail') return setMyEmail(config, session.username, body.email);
   if (action === 'getNotifyConfig') return getNotifyConfig(config, session.username);
+  if (action === 'notify') return sendNotify(config, session.username, body);
   if (action === 'setNotifyConfig') return requireAdminThen(config, session.username, () => setNotifyConfig(config, session.username, body));
+  if (action === 'setNotifySwitches') return requireAdminThen(config, session.username, () => setNotifySwitches(config, body));
+  if (action === 'setUserEmail') return requireAdminThen(config, session.username, () => setUserEmail(config, body));
   if (action === 'testNotify') return requireAdminThen(config, session.username, () => testNotify(config, session.username, body));
   if (action === 'logout') return logout(config, session.username);
 
@@ -192,20 +197,119 @@ async function setMyEmail(config, username, email) {
   return { ok: true, email: value };
 }
 
+function readSwitches(m) {
+  const off = (v) => v === '0' || v === 'false' || v === 'off';
+  return {
+    enabled: !off(m.notify_enabled),
+    feed: !off(m.notify_feed),
+    message: !off(m.notify_message),
+    like: !off(m.notify_like)
+  };
+}
+
+function isCouplePair(username) {
+  return username === 'boy' || username === 'girl';
+}
+
+function maskEmail(email) {
+  const s = String(email || '');
+  const at = s.indexOf('@');
+  if (at <= 1) return s;
+  return s.slice(0, 1) + '***' + s.slice(at);
+}
+
 async function getNotifyConfig(config, username) {
   let m;
   try { m = await getSiteValues(config); }
   catch (e) { throw httpError(400, '通知配置表未初始化：请先在 Supabase SQL Editor 运行 site_config 建表 SQL（见管理后台提示）'); }
   const emails = {};
   for (const [k, v] of Object.entries(m)) if (k.startsWith('email_') && v) emails[k.slice(6)] = v;
+  const switches = readSwitches(m);
+  const me = await fetchUser(config, username, 'username,role');
+  const admin = username === 'admin' || (me && me.role === 'admin');
+  // 普通用户只需拿到自己的邮箱与开关，不下发 EmailJS 凭证与全员邮箱，避免被拿去刷配额
+  if (!admin) return { isAdmin: false, myEmail: emails[username] || '', switches };
   return {
+    isAdmin: true,
     emailjs: {
       publicKey: m.emailjs_public_key || '',
       serviceId: m.emailjs_service_id || '',
       templateId: m.emailjs_template_id || ''
     },
-    emails
+    emails,
+    switches
   };
+}
+
+// 事件通知：仅 boy/girl 发布时，把通知发给"对方"。管理员、测试账号等不发送；
+// 对方未绑定邮箱、开关关闭、EmailJS 未配置时静默跳过，不占用免费额度。
+async function sendNotify(config, username, body) {
+  const kind = String(body.kind || '');
+  if (!['feed', 'message', 'like'].includes(kind)) return { ok: true, sent: false, reason: 'unknown_kind' };
+  if (!isCouplePair(username)) return { ok: true, sent: false, reason: 'not_couple' };
+
+  let m;
+  try { m = await getSiteValues(config); }
+  catch (e) { return { ok: true, sent: false, reason: 'config_unavailable' }; }
+
+  const sw = readSwitches(m);
+  if (!sw.enabled) return { ok: true, sent: false, reason: 'disabled' };
+  if (!sw[kind]) return { ok: true, sent: false, reason: 'kind_disabled' };
+
+  const recipient = username === 'boy' ? 'girl' : 'boy';
+  const to = String(m['email_' + recipient] || '').trim();
+  if (!to) return { ok: true, sent: false, reason: 'recipient_no_email' };
+
+  const publicKey = m.emailjs_public_key, serviceId = m.emailjs_service_id, templateId = m.emailjs_template_id;
+  if (!publicKey || !serviceId || !templateId) return { ok: true, sent: false, reason: 'emailjs_not_configured' };
+
+  // 实例级限流：同一发布者、同一事件 30 秒内最多 1 封，防止前端重试或脚本刷配额
+  const rk = username + ':' + kind;
+  const now = Date.now();
+  const last = NOTIFY_RATE.get(rk) || 0;
+  if (now - last < 30000) return { ok: true, sent: false, reason: 'rate_limited' };
+  NOTIFY_RATE.set(rk, now);
+
+  const detail = String(body.detail || '').slice(0, 60);
+  const texts = {
+    feed: `你的TA在时光相册发布了新内容${detail ? '：' + detail : ''}`,
+    message: `你的TA在留言板写了一条留言${detail ? '：' + detail : ''}`,
+    like: `你的TA点赞了你的内容`
+  };
+  const resp = await fetch('https://api.emailjs.com/api/v1.0/email/send', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      service_id: serviceId,
+      template_id: templateId,
+      user_id: publicKey,
+      template_params: { to_email: to, from_name: '我们的专属小站', message: texts[kind] }
+    })
+  });
+  const text = await resp.text();
+  if (!resp.ok) throw httpError(502, '通知发送失败：' + (text || ('HTTP ' + resp.status)));
+  return { ok: true, sent: true, to: maskEmail(to) };
+}
+
+async function setNotifySwitches(config, body) {
+  const map = { enabled: 'notify_enabled', feed: 'notify_feed', message: 'notify_message', like: 'notify_like' };
+  const out = {};
+  for (const [k, kv] of Object.entries(map)) {
+    if (body[k] !== undefined) { const v = body[k] ? '1' : '0'; await setSiteValue(config, kv, v); out[k] = !!body[k]; }
+  }
+  return { ok: true, switches: out };
+}
+
+// 管理员为指定账号设置/清空通知邮箱（用于后台直接绑定 boy/girl 的收件邮箱）
+async function setUserEmail(config, body) {
+  const target = cleanUsername(body.username);
+  if (!target) throw httpError(400, '请选择要设置邮箱的账号');
+  const user = await fetchUser(config, target, 'username');
+  if (!user) throw httpError(404, '账号不存在');
+  const email = String(body.email || '').trim();
+  if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw httpError(400, '邮箱格式不正确');
+  await setSiteValue(config, 'email_' + target, email);
+  return { ok: true, username: target, email };
 }
 
 async function setNotifyConfig(config, username, body) {
