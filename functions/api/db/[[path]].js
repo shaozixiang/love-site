@@ -12,8 +12,14 @@ const ALLOWED_TABLES = new Set([
   'apologies', 'admin_logs', 'site_config'
 ]);
 
-// 带“可见性/软删除”字段的内容表：读取时服务端强制按角色过滤，防越权（S2）
-const CONTENT_TABLES = new Set([
+// 带软删除字段（回收站）的表，共 9 张：本代理读取时一律只返回未删除记录，
+// 已删除内容只能由管理员通过独立 /api/trash 接口查看
+const SOFT_DELETE_TABLES = new Set([
+  'feeds', 'messages', 'loves', 'memories', 'memos',
+  'schedules', 'countdowns', 'travel_markers', 'apologies'
+]);
+// 带 visibility 字段的内容表（8 张；apologies 无该字段）：普通用户强制只见公开
+const VISIBILITY_TABLES = new Set([
   'feeds', 'messages', 'loves', 'memories', 'memos',
   'schedules', 'countdowns', 'travel_markers'
 ]);
@@ -48,9 +54,13 @@ export async function onRequest(context) {
     const method = request.method;
     const body = (method === 'GET' || method === 'HEAD') ? undefined : await request.text();
 
+    // 角色只判定一次（管理员/情侣账号）
+    const isAdmin = await checkAdmin(config, session.username);
+    const isCouple = COUPLE_USERNAMES.has(session.username);
+
     // 读操作：操作日志仅管理员可查看（M1/S2）
     if ((method === 'GET' || method === 'HEAD') && table === 'admin_logs') {
-      if (!(await checkAdmin(config, session.username))) {
+      if (!isAdmin) {
         return jsonResponse({ error: '操作日志仅管理员可查看' }, 403);
       }
     }
@@ -60,7 +70,10 @@ export async function onRequest(context) {
     catch (e) { return jsonResponse({ error: e.message || '无权操作' }, 403); }
 
     // 3. 用 service role 转发到真实 Supabase（service role 绕过 RLS）
-    const upstream = `${config.supabaseUrl}/rest/v1/${table}${url.search}`;
+    // 读取请求在服务端强制注入行级条件（S2）：无论前端 select 哪些列、带什么参数，
+    // 软删除/可见性/私密规则都在数据库层生效，无法靠精简 select 绕过
+    const safeSearch = buildSafeSearch(url, table, method, session.username, isAdmin, isCouple);
+    const upstream = `${config.supabaseUrl}/rest/v1/${table}${safeSearch}`;
     const headers = {
       apikey: config.serviceKey,
       Authorization: `Bearer ${config.serviceKey}`,
@@ -71,9 +84,9 @@ export async function onRequest(context) {
 
     const resp = await fetch(upstream, { method, headers, body });
     let respText = await resp.text();
-    // 读取结果在服务端按角色强制过滤 / 裁剪敏感列（S2），无论前端传了什么参数
+    // 出口过滤/裁剪作为纵深防御（S2）：正常情况下入口已保证数据安全
     if (method === 'GET' || method === 'HEAD') {
-      respText = await applyReadFilter(config, session.username, table, respText, resp.status);
+      respText = await applyReadFilter(config, session.username, table, respText, resp.status, isAdmin, isCouple);
     }
     return new Response(respText, { status: resp.status, headers: { 'Content-Type': 'application/json; charset=utf-8' } });
   } catch (e) {
@@ -151,10 +164,12 @@ async function checkAdmin(config, username) {
   return Array.isArray(qRows) && qRows.length > 0 && (qRows[0].role === 'admin' || String(username).toLowerCase() === 'admin');
 }
 
-// 读取结果按角色过滤（S2）：
+// 读取结果按角色过滤（S2，出口纵深防御，正常情况下入口 buildSafeSearch 已保证）：
 // - users：剥掉密码哈希/盐/遗留明文列；非管理员只能看到自己那一行
-// - 内容表：所有角色都看不到已进回收站(deleted_at)的记录；非管理员且非情侣账号看不到 couple_only
-async function applyReadFilter(config, username, table, text, status) {
+// - 软删除表：所有角色都看不到已进回收站的记录
+// - 可见性表：非管理员且非情侣账号看不到 couple_only
+// - loves：private 仅作者本人和管理员可见
+async function applyReadFilter(config, username, table, text, status, isAdmin, isCouple) {
   let data;
   try { data = JSON.parse(text); } catch (e) { return text; }
   if (!status || status < 200 || status >= 300) return text;
@@ -167,7 +182,6 @@ async function applyReadFilter(config, username, table, text, status) {
   };
 
   if (table === 'users') {
-    const isAdmin = await checkAdmin(config, username);
     if (Array.isArray(data)) {
       data = data.filter(r => isAdmin || (r && r.username === username)).map(scrubUser);
     } else if (data && typeof data === 'object') {
@@ -177,21 +191,61 @@ async function applyReadFilter(config, username, table, text, status) {
     return JSON.stringify(data);
   }
 
-  if (CONTENT_TABLES.has(table) && Array.isArray(data)) {
-    const isAdmin = await checkAdmin(config, username);
-    const isCouple = COUPLE_USERNAMES.has(username);
+  if (SOFT_DELETE_TABLES.has(table) && Array.isArray(data)) {
     data = data.filter(r => {
       if (!r || typeof r !== 'object') return true;
-      // 已进入回收站的记录对所有角色隐藏（回收站走独立 /api/trash）
+      // 行中带 deleted_at 字段且非空（已进回收站）→ 隐藏
       if (r.deleted_at !== null && r.deleted_at !== undefined && r.deleted_at !== '') return false;
       // 情侣私密内容仅管理员和情侣账号可见
-      if (r.visibility === 'couple_only' && !isAdmin && !isCouple) return false;
+      if (VISIBILITY_TABLES.has(table) && r.visibility === 'couple_only' && !isAdmin && !isCouple) return false;
+      // 感动的话：private 仅作者本人和管理员可见
+      if (table === 'loves' && r.privacy === 'private' && !isAdmin && r.author !== username) return false;
       return true;
     });
     return JSON.stringify(data);
   }
 
   return text;
+}
+
+// 服务端在转发前强制注入行级过滤条件（S2 的核心防线）
+// 与前端传入的 select 列、where 条件完全无关：数据库层先过滤，再返回结果
+function buildSafeSearch(url, table, method, username, isAdmin, isCouple) {
+  if (method !== 'GET' && method !== 'HEAD') return url.search;
+  const params = new URLSearchParams(url.search);
+  const andParts = [];
+  const safeName = /^[A-Za-z0-9_-]{1,32}$/.test(String(username)) ? username : '';
+
+  // 1) 软删除表：强制只返回未删除记录（回收站走独立 /api/trash）
+  if (SOFT_DELETE_TABLES.has(table)) {
+    params.delete('deleted_at');
+    params.append('deleted_at', 'is.null');
+  }
+
+  // 2) 可见性表：普通用户（非管理员、非情侣账号）强制只见公开（null 或 public）
+  if (VISIBILITY_TABLES.has(table) && !isAdmin && !isCouple) {
+    params.delete('visibility'); // 忽略任何客户端传入的 visibility 探测
+    andParts.push('or(visibility.is.null,visibility.eq.public)');
+  }
+
+  // 3) 感动的话：private 仅作者本人与管理员可见
+  if (table === 'loves' && !isAdmin && safeName) {
+    andParts.push('or(privacy.is.null,privacy.neq.private,author.eq.' + safeName + ')');
+  }
+
+  // 4) users 表：非管理员只能看到自己那一行
+  if (table === 'users' && !isAdmin && safeName) {
+    params.delete('username');
+    params.append('username', 'eq.' + safeName);
+  }
+
+  // 保留客户端已有 and 条件（与服务端条件为 AND，无法绕过；前端目前未使用）
+  params.getAll('and').forEach(v => { if (v) andParts.push(v); });
+  params.delete('and');
+  if (andParts.length) params.append('and', '(' + andParts.join(',') + ')');
+
+  const s = params.toString();
+  return s ? '?' + s : '';
 }
 
 function authHeaders(config) {
