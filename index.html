@@ -268,7 +268,7 @@
             width: 100%;
             height: 100%;
             background: #fff0f3;
-            z-index: 10050;
+            z-index: 9000;
             overflow-y: auto;
             padding: 20px;
         }
@@ -647,7 +647,7 @@ body{background:var(--bg);color:var(--ink);}
     <link rel="stylesheet" href="/lib/leaflet.css?v=20261011a">
     <script defer src="/lib/leaflet.js?v=20261011a"></script>
     <script defer src="/lib/supabase.min.js?v=20261011a"></script>
-    <script defer src="/lib/app.js?v=20261019d"></script>
+    <script defer src="/lib/app.js?v=20261019e"></script>
 </head>
 <body>
     <div class="bubble-layer" id="bubbleLayer"><div class="bubble-tip">💖 点击10个爱心气泡，解锁我们的小站~</div><div class="bubble-count">已点击：<span id="bubbleCount">0</span> / 10</div></div>
@@ -699,7 +699,7 @@ body{background:var(--bg);color:var(--ink);}
     <div class="heart-float" style="top:10%;left:5%">💖</div><div class="heart-float" style="top:20%;right:10%">💕</div>
     <div id="avatarModal" class="modal-overlay"><div class="modal-card"><span class="close-modal" onclick="closeModalById('avatarModal')">&times;</span><h3>📸 修改头像</h3><input type="file" id="avatarInput" accept="image/*"><button class="submit-btn" onclick="updateAvatar()">保存头像</button></div></div>
     <div id="passwordModal" class="modal-overlay"><div class="modal-card"><span class="close-modal" onclick="closeModalById('passwordModal')">&times;</span><h3>🔐 修改密码</h3><input type="password" id="oldPwd" placeholder="原密码"><input type="password" id="newPwd" placeholder="新密码"><input type="password" id="confirmPwd" placeholder="确认新密码"><button class="submit-btn" onclick="changePassword()">确认修改</button></div></div>
-    <div id="registerModal" class="modal-overlay"><div class="modal-card"><span class="close-modal" onclick="closeModalById('registerModal')">&times;</span><h3>📝 注册新账号</h3><input type="text" id="newUsername" placeholder="账号 (boy/girl风格)"><input type="password" id="newUserPwd" placeholder="密码"><button class="submit-btn" onclick="registerNewUser()">注册</button></div></div>
+    <div id="registerModal" class="modal-overlay"><div class="modal-card"><span class="close-modal" onclick="closeModalById('registerModal')">&times;</span><h3>📝 注册新账号</h3><div id="registerInviteWrap" style="display:none;text-align:left;margin-bottom:6px;"><input type="text" id="newUserInvite" placeholder="🔑 注册邀请码（向管理员索取）" style="width:100%;"><div style="font-size:11px;color:#999;margin:2px 2px 6px;">本站为私密小站，需要邀请码才能注册。</div></div><input type="text" id="newUsername" placeholder="账号 (boy/girl风格)"><input type="password" id="newUserPwd" placeholder="密码"><button class="submit-btn" onclick="registerNewUser()">注册</button></div></div>
     <div id="setUserPasswordModal" class="modal-overlay"><div class="modal-card"><span class="close-modal" onclick="closeModalById('setUserPasswordModal')">&times;</span><h3>🔐 设置账号密码</h3><input type="text" id="setPwdUsername" placeholder="账号" readonly><input type="password" id="setPwdNew" placeholder="新密码"><input type="password" id="setPwdConfirm" placeholder="确认新密码"><button class="submit-btn" onclick="setUserPassword()">保存新密码</button></div></div>
     <div id="adminPanel" class="admin-panel">
       <div class="adm-head">
@@ -728,7 +728,7 @@ body{background:var(--bg);color:var(--ink);}
     <div class="video-modal" id="videoModal"><div class="modal-content"><span class="close-modal-icon" onclick="closeVideoModal()">&times;</span><video id="modalVideo" controls style="max-width:90vw;max-height:80vh"></video></div></div>
     <div class="bubble-settings-modal" id="bubbleSettingsModal"><div class="bubble-settings-card"><h3>🎈 梦幻背景气泡</h3><div style="display:flex; justify-content:space-between; margin:10px 0;"><span>✨ 开启气泡</span><div class="toggle-switch" id="bubbleToggle"></div></div><div style="display:flex; justify-content:space-between; margin:10px 0;"><span>⏱️ 间隔(秒)</span><input type="number" id="bubbleInterval" min="6" max="25" value="12" class="interval-input"></div><div><strong>📸 共享照片池</strong></div><div style="margin:10px 0; padding:12px; border:1px dashed #ffb7c5; border-radius:20px; text-align:center; cursor:pointer;" onclick="document.getElementById('bubblePhotoInput').click()">➕ 添加照片<input type="file" id="bubblePhotoInput" accept="image/*" multiple style="display:none"></div><div class="photo-list-preview" id="bubblePhotoList"></div><button class="submit-btn" style="width:100%; margin-top:8px;" onclick="saveBubbleSettings()">保存</button><button class="submit-btn" style="width:100%; margin-top:8px; background:#ccc;" onclick="closeBubbleSettings()">关闭</button></div></div>
     <div class="angry-mask" id="angryMask"><div class="angry-box"><h3>😠 TA正在生气</h3><p style="margin:10px 0;color:#666;font-size:14px;">快去写封道歉信哄哄TA吧~</p><textarea class="angry-textarea" id="apologyInput" placeholder="写道歉信..."></textarea><button class="submit-btn" onclick="submitApology()">提交道歉</button><button class="submit-btn" style="margin-top:10px;background:#999;" onclick="closeAngryMask()">暂不道歉，先逛逛</button></div></div>
-    <div class="login-container" id="loginPage"><div class="login-box"><h2>💖 欢迎来到我们的小站 💖</h2><input type="text" class="login-input" id="username" placeholder="账号"><input type="password" class="login-input" id="password" placeholder="密码"><button class="login-btn" id="loginBtn" onclick="login()">登录</button></div></div>
+    <div class="login-container" id="loginPage"><div class="login-box"><h2>💖 欢迎来到我们的小站 💖</h2><input type="text" class="login-input" id="username" placeholder="账号"><input type="password" class="login-input" id="password" placeholder="密码"><button class="login-btn" id="loginBtn" onclick="login()">登录</button><div style="margin-top:14px;text-align:center;"><span style="font-size:13px;color:#aaa;">还没有账号？</span><a href="javascript:void(0)" onclick="openPublicRegisterModal()" style="font-size:13px;color:#ff6b81;font-weight:600;text-decoration:none;margin-left:4px;">📝 注册账号</a></div></div></div>
     <div class="main-container" id="mainPage">
         <div class="user-profile"><div class="avatar-wrapper" onclick="openAvatarModal()"><img id="userAvatarImg" class="avatar-img" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%23ff6b81'%3E%3Cpath d='M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z'/%3E%3C/svg%3E"><div class="avatar-edit-icon">✎</div></div><div><span class="user-name" id="displayUsername"></span><div id="onlineStatus" style="font-size:12px;margin-top:2px;"></div></div><div class="settings-dropdown"><button class="gear-btn" onclick="toggleDropdown()">⚙️ ▼</button><div class="dropdown-menu" id="dropdownMenu"><button onclick="openPasswordModal()">修改密码</button><button onclick="openAdminPanel()" id="adminEntryBtn" style="display:none;">🔧 管理后台</button><button onclick="logout()">退出登录</button></div></div></div>
         <div class="settings-bubble-btn" id="openBubbleSettingsBtn">🎈</div>

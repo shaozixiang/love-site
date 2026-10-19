@@ -36,6 +36,7 @@ export async function onRequest(context) {
 async function handleAction(config, body) {
   const action = String(body.action || '');
   if (action === 'login') return login(config, body);
+  if (action === 'publicRegister') return publicRegister(config, body);
 
   const session = await requireSession(config, body.sessionToken);
   if (action === 'me') return { user: await getPublicUser(config, session.username) };
@@ -55,6 +56,8 @@ async function handleAction(config, body) {
   if (action === 'setNotifyConfig') return requireAdminThen(config, session.username, () => setNotifyConfig(config, session.username, body));
   if (action === 'setNotifySwitches') return requireAdminThen(config, session.username, () => setNotifySwitches(config, body));
   if (action === 'setUserEmail') return requireAdminThen(config, session.username, () => setUserEmail(config, body));
+  if (action === 'setSignupCode') return requireAdminThen(config, session.username, () => setSignupCode(config, body));
+  if (action === 'getSignupCode') return requireAdminThen(config, session.username, () => getSignupCode(config));
   if (action === 'testNotify') return requireAdminThen(config, session.username, () => testNotify(config, session.username, body));
   if (action === 'logout') return logout(config, session.username);
 
@@ -104,6 +107,50 @@ async function createUser(config, body) {
     is_online: false
   });
   return { user: sanitizeUser(row) };
+}
+
+// 登录页公开注册：不需要登录，但必须持有管理员在后台设置的"注册邀请码"
+// 未设置 signup_code 时通道默认关闭，避免私密小站被陌生人自助注册
+async function publicRegister(config, body) {
+  const username = cleanUsername(body.username);
+  const password = String(body.password || '');
+  const inviteCode = String(body.inviteCode || '').trim();
+  if (!username || !password) throw httpError(400, '请填写账号和密码');
+  if (!inviteCode) throw httpError(400, '请填写注册邀请码');
+  assertPassword(password);
+
+  let m = {};
+  try { m = await getSiteValues(config); } catch (e) { throw httpError(400, '注册服务暂不可用，请稍后再试'); }
+  const signupCode = String(m.signup_code || '').trim();
+  if (!signupCode) throw httpError(403, '注册通道未开通，请联系管理员');
+  if (inviteCode !== signupCode) throw httpError(403, '邀请码不正确');
+
+  if (await fetchUser(config, username, PUBLIC_USER_COLUMNS)) throw httpError(409, '账号已存在');
+  const passwordData = await buildPasswordFields(config, password);
+  const row = await insertUser(config, {
+    username,
+    password: null,
+    ...passwordData,
+    avatar: '',
+    permission: 'comment',  // 自助注册默认仅可评论/点赞，管理员可在后台提升为完全权限
+    role: 'user',
+    is_online: false
+  });
+  // 注册成功直接登录，省去再次输入
+  await patchUser(config, username, { last_active: new Date().toISOString(), is_online: true });
+  return { user: sanitizeUser(row), sessionToken: await signSession(config, username) };
+}
+
+async function setSignupCode(config, body) {
+  const code = String(body.code || '').trim();
+  await setSiteValue(config, 'signup_code', code);  // 空字符串即关闭注册通道
+  return { ok: true, code };
+}
+
+async function getSignupCode(config) {
+  let m = {};
+  try { m = await getSiteValues(config); } catch (e) { return { code: '' }; }
+  return { code: m.signup_code || '' };
 }
 
 async function deleteUser(config, usernameInput) {
