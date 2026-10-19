@@ -79,7 +79,10 @@ async function login(config, body) {
 }
 
 async function listUsers(config) {
-  const rows = await supabase(config, `/users?select=${encodeURIComponent(PUBLIC_USER_COLUMNS)}&order=username.asc`, { method: 'GET' });
+  // 后台用户列表只展示首字母/角色/权限/在线状态，不返回大体积 base64 头像，
+  // 避免响应体过大（此前可达 180KB+）导致移动端/弱网下后台加载超时
+  const LIST_USER_COLUMNS = 'username,permission,role,last_active,is_online';
+  const rows = await supabase(config, `/users?select=${encodeURIComponent(LIST_USER_COLUMNS)}&order=username.asc`, { method: 'GET' });
   return { users: (rows || []).map(sanitizeUser) };
 }
 
