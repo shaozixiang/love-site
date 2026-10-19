@@ -58,6 +58,8 @@ async function handleAction(config, body) {
   if (action === 'setUserEmail') return requireAdminThen(config, session.username, () => setUserEmail(config, body));
   if (action === 'setSignupCode') return requireAdminThen(config, session.username, () => setSignupCode(config, body));
   if (action === 'getSignupCode') return requireAdminThen(config, session.username, () => getSignupCode(config));
+  if (action === 'getBubbleConfig') return requireAdminThen(config, session.username, () => getBubbleConfig(config));
+  if (action === 'setBubbleConfig') return requireAdminThen(config, session.username, () => setBubbleConfig(config, body));
   if (action === 'testNotify') return requireAdminThen(config, session.username, () => testNotify(config, session.username, body));
   if (action === 'logout') return logout(config, session.username);
 
@@ -151,6 +153,26 @@ async function getSignupCode(config) {
   let m = {};
   try { m = await getSiteValues(config); } catch (e) { return { code: '' }; }
   return { code: m.signup_code || '' };
+}
+
+async function getBubbleConfig(config) {
+  try {
+    const rows = await supabase(config, '/bubble_config?select=id,enabled,interval&limit=1', { method: 'GET' });
+    const row = (rows && rows[0]) || null;
+    return { enabled: row ? row.enabled !== false : true, interval: (row && row.interval) || 12 };
+  } catch (e) { return { enabled: true, interval: 12 }; }
+}
+
+async function setBubbleConfig(config, body) {
+  const enabled = body.enabled !== false;
+  const interval = Math.max(3, Math.min(120, parseInt(body.interval, 10) || 12));
+  const rows = await supabase(config, '/bubble_config?select=id&limit=1', { method: 'GET' });
+  if (rows && rows[0] && rows[0].id) {
+    await supabase(config, `/bubble_config?id=eq.${encodeURIComponent(rows[0].id)}`, { method: 'PATCH', body: { enabled, interval }, prefer: 'return=representation' });
+  } else {
+    await supabase(config, '/bubble_config', { method: 'POST', body: { enabled, interval }, prefer: 'return=representation' });
+  }
+  return { ok: true, enabled, interval };
 }
 
 async function deleteUser(config, usernameInput) {
