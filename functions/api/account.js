@@ -27,10 +27,62 @@ export async function onRequest(context) {
 
   try {
     const result = await handleAction(config, body || {});
+    await accountLog(config, (body || {}).action || '', body || {}, result, request, null);
     return jsonResponse(result, 200, headers);
   } catch (error) {
+    await accountLog(config, (body || {}).action || '', body || {}, null, request, error);
     return jsonResponse({ error: error.message || 'Account request failed.' }, error.status || 500, headers);
   }
+}
+
+// ---------- 服务端操作日志（带真实 IP/UA，防伪造；失败静默） ----------
+async function serverLog(config, action, username, details) {
+  try {
+    const row = { action, user: username || 'guest', details: JSON.stringify(details || {}), created_at: new Date().toISOString() };
+    await fetch(`${config.supabaseUrl}/rest/v1/admin_logs`, {
+      method: 'POST',
+      headers: { apikey: config.serviceKey, Authorization: `Bearer ${config.serviceKey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify(row)
+    });
+  } catch (e) {}
+}
+
+const ACCOUNT_LOG_LABELS = {
+  createUser: '创建账号', deleteUser: '删除账号', toggleUserRole: '切换用户角色',
+  setUserPermission: '设置用户权限', setUserPassword: '重置用户密码', setUserEmail: '设置用户邮箱',
+  changePassword: '修改密码', setMyEmail: '绑定邮箱', updateAvatar: '更新头像',
+  setSignupCode: '注册通道设置', setBubbleConfig: '梦幻气泡设置',
+  setNotifyConfig: '通知设置', setNotifySwitches: '通知开关设置',
+  logout: '用户登出', testNotify: '发送测试邮件'
+};
+
+async function accountLog(config, action, body, result, request, error) {
+  try {
+    let label = '';
+    let username = '';
+    const details = {
+      ip: request.headers.get('CF-Connecting-IP') || request.headers.get('x-real-ip') || '',
+      user_agent: (request.headers.get('user-agent') || '').substring(0, 120),
+      ok: !error
+    };
+    if (action === 'login') {
+      username = cleanUsername(body.username) || 'guest';
+      label = error ? '登录失败' : '用户登录';
+    } else if (action === 'publicRegister') {
+      if (error) return;
+      username = (result && result.user && result.user.username) || cleanUsername(body.username);
+      label = '新用户注册';
+    } else if (ACCOUNT_LOG_LABELS[action]) {
+      label = ACCOUNT_LOG_LABELS[action];
+      try { const sess = await requireSession(config, body.sessionToken); username = sess.username; } catch (e) { username = 'guest'; }
+    } else {
+      return;
+    }
+    if (error) details.error = String(error.message || '').substring(0, 80);
+    if (action !== 'login' && body.username) details.target = body.username;
+    if (body.email) details.email = body.email;
+    await serverLog(config, label, username, details);
+  } catch (e) {}
 }
 
 async function handleAction(config, body) {

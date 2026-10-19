@@ -81,12 +81,33 @@ export async function onRequest(context) {
     };
     const prefer = request.headers.get('Prefer');
     if (prefer) headers['Prefer'] = prefer;
+    const range = request.headers.get('Range');
+    if (range) headers['Range'] = range;
 
     const resp = await fetch(upstream, { method, headers, body });
     let respText = await resp.text();
     // 出口过滤/裁剪作为纵深防御（S2）：正常情况下入口已保证数据安全
     if (method === 'GET' || method === 'HEAD') {
       respText = await applyReadFilter(config, session.username, table, respText, resp.status, isAdmin, isCouple);
+    }
+    // 写操作成功后由服务端记录操作日志（带真实 IP/UA，M1 防伪造；日志表自身除外）
+    if (resp.ok && method !== 'GET' && method !== 'HEAD' && table !== 'admin_logs') {
+      try {
+        const idMatch = String(url.search).match(/id=eq\.([^&]+)/);
+        const row = {
+          action: describeDbAction(method, table, body),
+          user: session.username || 'guest',
+          details: JSON.stringify({
+            table, method,
+            target: idMatch ? decodeURIComponent(idMatch[1]) : '',
+            query: String(url.search).substring(0, 200),
+            ip: request.headers.get('CF-Connecting-IP') || request.headers.get('x-real-ip') || '',
+            user_agent: (request.headers.get('user-agent') || '').substring(0, 120)
+          }),
+          created_at: new Date().toISOString()
+        };
+        context.waitUntil(fetch(`${config.supabaseUrl}/rest/v1/admin_logs`, { method: 'POST', headers: authHeaders(config), body: JSON.stringify(row) }));
+      } catch (e) {}
     }
     return new Response(respText, { status: resp.status, headers: { 'Content-Type': 'application/json; charset=utf-8' } });
   } catch (e) {
@@ -256,6 +277,37 @@ function buildSafeSearch(url, table, method, username, isAdmin, isCouple) {
 
 function authHeaders(config) {
   return { apikey: config.serviceKey, Authorization: `Bearer ${config.serviceKey}`, 'Content-Type': 'application/json' };
+}
+
+// 把数据库写操作翻译成人类可读的日志动作名
+const TABLE_CN = {
+  feeds: '相册', messages: '留言', loves: '心动', memories: '回忆', memos: '待办',
+  schedules: '日程', countdowns: '倒计时', travel_markers: '足迹', angry_mode: '生气',
+  apologies: '道歉', bubble_photos: '气泡照片', bubble_config: '气泡设置', site_config: '站点设置', users: '账号'
+};
+function describeDbAction(method, table, bodyText) {
+  const cn = TABLE_CN[table] || table;
+  let payload = {};
+  try { payload = JSON.parse(bodyText || '{}'); } catch (e) {}
+  if (method === 'POST') {
+    if (table === 'bubble_photos') return '上传气泡照片';
+    if (table === 'bubble_config') return '修改气泡设置';
+    if (table === 'site_config') return '修改站点设置';
+    if (table === 'users') return '新增账号';
+    return '发布' + cn;
+  }
+  if (method === 'DELETE') return '彻底删除' + cn;
+  if (method === 'PATCH') {
+    if (payload.deleted_at !== undefined) return payload.deleted_at === null ? ('恢复' + cn + '（回收站）') : ('移入回收站·' + cn);
+    if (payload.visibility !== undefined) return '调整' + cn + '可见性';
+    if (payload.likes !== undefined) return '点赞' + cn;
+    if (payload.comments !== undefined) return '评论' + cn;
+    if (table === 'bubble_config') return '修改气泡设置';
+    if (table === 'site_config') return '修改站点设置';
+    if (table === 'users') return '编辑账号';
+    return '编辑' + cn;
+  }
+  return cn + '操作';
 }
 
 // ---------- 以下为会话校验与辅助函数（与 /api/account 同一套实现） ----------

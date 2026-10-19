@@ -93,6 +93,7 @@ export async function onRequest(context) {
         headers: { 'Content-Type': 'application/json', Prefer: 'return=minimal' },
         body: JSON.stringify({ deleted_at: new Date().toISOString(), deleted_by: session.username })
       });
+      await trashLog(cfg, '移入回收站·' + TABLES[table].type, session.username, { module: table, id, files: rels.length, title: String(TABLES[table].title(row) || '').slice(0, 60) }, request);
       return jsonResponse({ ok: true, moved }, 200);
     }
 
@@ -111,6 +112,7 @@ export async function onRequest(context) {
         headers: { 'Content-Type': 'application/json', Prefer: 'return=minimal' },
         body: JSON.stringify({ deleted_at: null, deleted_by: null })
       });
+      await trashLog(cfg, '从回收站恢复·' + TABLES[table].type, session.username, { module: table, id, files: rels.length }, request);
       return jsonResponse({ ok: true }, 200);
     }
 
@@ -123,6 +125,7 @@ export async function onRequest(context) {
         if (!r.ok) return jsonResponse({ error: '文件删除失败：' + r.error }, 502);
       }
       await sbQuery(cfg, `${table}?id=eq.${encodeURIComponent(id)}`, { method: 'DELETE' });
+      await trashLog(cfg, '彻底删除·' + TABLES[table].type, session.username, { module: table, id, files: rels.length }, request);
       return jsonResponse({ ok: true }, 200);
     }
 
@@ -249,6 +252,23 @@ async function sbQuery(cfg, qs, opts = {}) {
   });
   const txt = await resp.text();
   try { return txt ? JSON.parse(txt) : null; } catch (_) { return null; }
+}
+
+// 回收站操作服务端日志（带真实 IP/UA，防伪造；失败静默）
+async function trashLog(cfg, action, username, details, request) {
+  try {
+    const row = {
+      action,
+      user: username || 'guest',
+      details: JSON.stringify({
+        ...(details || {}),
+        ip: request.headers.get('CF-Connecting-IP') || request.headers.get('x-real-ip') || '',
+        user_agent: (request.headers.get('user-agent') || '').substring(0, 120)
+      }),
+      created_at: new Date().toISOString()
+    };
+    await sbQuery(cfg, 'admin_logs', { method: 'POST', body: JSON.stringify(row) });
+  } catch (e) {}
 }
 
 async function checkAdmin(cfg, username) {
