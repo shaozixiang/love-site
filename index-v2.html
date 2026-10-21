@@ -7,7 +7,7 @@
     <link rel="stylesheet" href="/lib/leaflet.css?v=20261011a">
     <script defer src="/lib/leaflet.js?v=20261011a"></script>
     <script defer src="/lib/supabase-v2.js?v=20261011a"></script>
-    <script defer src="/lib/app-v2.js?v=20261021d"></script>
+    <script defer src="/lib/app-v2.js?v=20261021e"></script>
 
     <style>
 /* ===== 专属优化版 · 全新浪漫设计（移动端优先） ===== */
@@ -768,10 +768,9 @@ input[type=file]::-webkit-file-upload-button{background:#fff;color:var(--pink);b
         <div class="modal-card">
             <span class="close-modal" onclick="closeModalById('usernameModal')">&times;</span>
             <h3>✏️ 修改用户名</h3>
-            <div style="font-size:13px;color:#666;margin-bottom:10px;">当前用户名：<b id="renameCurrentUser"></b>。改名后，你发布的动态、留言、点赞、评论等都会自动归属到新名字，历史内容不会丢失。</div>
+            <div style="font-size:13px;color:#666;margin-bottom:10px;">当前用户名：<b id="renameCurrentUser"></b>。改名后，你发布的内容会自动归属到新名字。</div>
             <input type="text" id="newUsernameInput" placeholder="新用户名（字母/数字/下划线/点/减号）" autocomplete="off">
             <input type="password" id="renamePwd" placeholder="输入当前密码确认">
-            <div style="font-size:12px;color:#c0392b;margin-bottom:10px;">改名后需要用新用户名重新登录，超级管理员 admin 不允许改名。</div>
             <button class="submit-btn" onclick="changeUsername()" style="width:100%;">确认修改</button>
         </div>
     </div>

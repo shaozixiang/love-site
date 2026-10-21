@@ -30,7 +30,7 @@ begin
     raise exception '用户名只能包含字母、数字、下划线、点、减号';
   end if;
   if new_n = 'admin' then
-    raise exception '不能使用保留用户名 admin';
+    raise exception '该用户名不可用，请更换';
   end if;
 
   select exists(select 1 from public.users where username = old_name) into has_old;

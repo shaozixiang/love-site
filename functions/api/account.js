@@ -307,8 +307,8 @@ async function changeUsername(config, username, body) {
   if (!newName) throw httpError(400, '新用户名不能为空');
   if (!/^[A-Za-z0-9_.-]+$/.test(newName)) throw httpError(400, '用户名只能包含字母、数字、下划线、点、减号');
   if (newName.length > 64) throw httpError(400, '用户名最长 64 个字符');
-  if (newName === 'admin') throw httpError(400, '不能使用保留用户名 admin');
-  if (username === 'admin') throw httpError(400, '超级管理员用户名不能修改');
+  if (newName === 'admin') throw httpError(400, '该用户名不可用，请更换');
+  if (username === 'admin') throw httpError(400, '当前账号不允许修改用户名');
   if (newName === username) throw httpError(400, '新用户名与当前用户名相同');
 
   // 必须验证密码，防止会话被冒用后改名
