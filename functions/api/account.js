@@ -73,6 +73,7 @@ const ACCOUNT_LOG_LABELS = {
   createUser: '创建账号', deleteUser: '删除账号', toggleUserRole: '切换用户角色',
   setUserPermission: '设置用户权限', setUserPassword: '重置用户密码', setUserEmail: '设置用户邮箱',
   changePassword: '修改密码', setMyEmail: '绑定邮箱', updateAvatar: '更新头像',
+  changeUsername: '修改用户名',
   setSignupCode: '注册通道设置', setBubbleConfig: '梦幻气泡设置',
   setNotifyConfig: '通知设置', setNotifySwitches: '通知开关设置',
   logout: '用户登出', testNotify: '发送测试邮件'
@@ -102,6 +103,7 @@ async function accountLog(config, action, body, result, request, error) {
     }
     if (error) details.error = String(error.message || '').substring(0, 80);
     if (action !== 'login' && body.username) details.target = body.username;
+    if (action === 'changeUsername') details.new_username = cleanUsername(body.newUsername);
     if (body.email) details.email = body.email;
     await serverLog(config, label, username, details);
   } catch (e) {}
@@ -122,6 +124,7 @@ async function handleAction(config, body, request) {
   if (action === 'setUserPermission') return requireAdminThen(config, session.username, () => setUserPermission(config, body.username, body.permission));
   if (action === 'setUserPassword') return requireAdminThen(config, session.username, () => setUserPassword(config, body.username, body.newPassword));
   if (action === 'changePassword') return changePassword(config, session.username, body.oldPassword, body.newPassword);
+  if (action === 'changeUsername') return changeUsername(config, session.username, body);
   if (action === 'updateAvatar') return updateAvatar(config, session.username, body.avatar);
   if (action === 'updateActivity') return updateActivity(config, session.username);
   if (action === 'onlineStatus') return onlineStatus(config, session.username);
@@ -297,6 +300,43 @@ async function changePassword(config, username, oldPassword, newPassword) {
   assertPassword(String(newPassword || ''));
   await updatePassword(config, username, String(newPassword));
   return { ok: true };
+}
+
+async function changeUsername(config, username, body) {
+  const newName = cleanUsername(body.newUsername);
+  if (!newName) throw httpError(400, '新用户名不能为空');
+  if (!/^[A-Za-z0-9_.-]+$/.test(newName)) throw httpError(400, '用户名只能包含字母、数字、下划线、点、减号');
+  if (newName.length > 64) throw httpError(400, '用户名最长 64 个字符');
+  if (newName === 'admin') throw httpError(400, '不能使用保留用户名 admin');
+  if (username === 'admin') throw httpError(400, '超级管理员用户名不能修改');
+  if (newName === username) throw httpError(400, '新用户名与当前用户名相同');
+
+  // 必须验证密码，防止会话被冒用后改名
+  const user = await fetchUser(config, username, USER_COLUMNS);
+  if (!user) throw httpError(404, '用户不存在');
+  if (!(await verifyPassword(config, String(body.password || ''), user))) throw httpError(401, '密码错误，请确认后再修改');
+
+  // 原子级联更新所有内容表（数据库函数 change_username）
+  try {
+    await supabase(config, '/rpc/change_username', {
+      method: 'POST',
+      body: { old_name: username, new_name: newName }
+    });
+  } catch (e) {
+    const msg = String(e && e.message || '');
+    if (/function.*change_username|could not find|does not exist/i.test(msg)) {
+      throw httpError(500, '改名功能未就绪：数据库函数尚未创建');
+    }
+    throw httpError(400, msg || '修改失败');
+  }
+
+  // 改名成功，重新读取新账号并签发新会话
+  const newUser = await fetchUser(config, newName, USER_COLUMNS);
+  if (!newUser) throw httpError(500, '修改已提交，但读取新账号失败');
+  return {
+    user: sanitizeUser({ ...newUser, password: undefined }),
+    sessionToken: await signSession(config, newName)
+  };
 }
 
 async function updateAvatar(config, username, avatar) {
