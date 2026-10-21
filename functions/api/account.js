@@ -26,7 +26,7 @@ export async function onRequest(context) {
   }
 
   try {
-    const result = await handleAction(config, body || {});
+    const result = await handleAction(config, body || {}, request);
     await accountLog(config, (body || {}).action || '', body || {}, result, request, null);
     return jsonResponse(result, 200, headers);
   } catch (error) {
@@ -45,6 +45,28 @@ async function serverLog(config, action, username, details) {
       body: JSON.stringify(row)
     });
   } catch (e) {}
+}
+
+// ---------- 前端行为埋点（批量，登录用户记 username，访客记 guest+IP） ----------
+async function trackEvents(config, body, request) {
+  const events = Array.isArray(body.events) ? body.events.slice(0, 20) : [];
+  if (events.length === 0) return { tracked: 0 };
+  let username = 'guest';
+  try { const sess = await requireSession(config, body.sessionToken); username = sess.username; } catch (e) { /* guest */ }
+  const ip = request.headers.get('CF-Connecting-IP') || request.headers.get('x-real-ip') || '';
+  const ua = (request.headers.get('user-agent') || '').substring(0, 120);
+  const pageUrl = String(body.page_url || '').substring(0, 120);
+  for (const ev of events) {
+    const type = String(ev.type || '').substring(0, 30);
+    if (!type) continue;
+    const target = String(ev.target || '').substring(0, 120);
+    const details = { ip, user_agent: ua, page_url: pageUrl, target };
+    if (ev.extra && typeof ev.extra === 'object') {
+      for (const k of Object.keys(ev.extra).slice(0, 5)) details['x_' + k] = String(ev.extra[k]).substring(0, 100);
+    }
+    await serverLog(config, '行为:' + type, username, details);
+  }
+  return { tracked: events.length };
 }
 
 const ACCOUNT_LOG_LABELS = {
@@ -85,10 +107,11 @@ async function accountLog(config, action, body, result, request, error) {
   } catch (e) {}
 }
 
-async function handleAction(config, body) {
+async function handleAction(config, body, request) {
   const action = String(body.action || '');
   if (action === 'login') return login(config, body);
   if (action === 'publicRegister') return publicRegister(config, body);
+  if (action === 'track') return trackEvents(config, body, request);
 
   const session = await requireSession(config, body.sessionToken);
   if (action === 'me') return { user: await getPublicUser(config, session.username) };
