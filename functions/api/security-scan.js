@@ -39,11 +39,14 @@ export async function onRequest(context) {
   try { body = await request.json(); } catch (e) { return jsonResponse({ error: 'Expected JSON request body.' }, 400, headers); }
   if (String(body.action || '') !== 'run') return jsonResponse({ error: '未知操作：仅支持 {"action":"run"}' }, 400, headers);
 
+  // 公开 publishable key（与 .github/workflows/keepalive.yml 中一致，公开无害），
+  // 作为未配置 SUPABASE_ANON_KEY 环境变量时的兜底，保证 RLS 探测始终运行
+  const FALLBACK_ANON_KEY = 'sb_publishable_Z8E9qPbi6F2NLzoQh9fhfw__goWiZZ4';
   // 组装引擎配置：服务端环境态只报布尔值，绝不报告具体值
   const report = await runSecurityChecks({
     siteUrl: new URL(request.url).origin,
     supabaseUrl: cfg.supabaseUrl,
-    supabaseAnonKey: env.SUPABASE_ANON_KEY || null,
+    supabaseAnonKey: env.SUPABASE_ANON_KEY || FALLBACK_ANON_KEY,
     serviceRoleKey: cfg.serviceKey,
     githubToken: env.GITHUB_TOKEN || null,
     githubOwner: cfg.owner,

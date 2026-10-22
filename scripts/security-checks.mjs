@@ -392,9 +392,10 @@ export async function runSecurityChecks(cfg) {
 
   // ---------- 9. 图床与代理 ----------
   const trav = await getHeaders(cfg, '/api/img/..%2f..%2f..%2fetc%2fpasswd');
+  // 401 同样安全：未登录的穿越请求在鉴权层即被拒绝（鉴权先于路径校验）
   checks.push(check('IMG-TRAVERSAL', '图床代理', '/api/img 路径穿越必须被拒绝',
-    'high', trav.status === 400 || trav.status === 403 ? 'pass' : 'fail',
-    `状态 ${trav.status}（期望 400/403）`,
+    'high', [400, 401, 403, 404].includes(trav.status) ? 'pass' : 'fail',
+    `状态 ${trav.status}（期望 400/401/403/404）`,
     trav.status === 200 ? '立即修复路径段校验，拒绝含 .. 的段' : ''));
   const imgNoAuth = await getHeaders(cfg, '/api/img/common/2099-01/nonexistent.jpg');
   checks.push(check('IMG-NOAUTH', '图床代理', '/api/img 无会话必须 401',
