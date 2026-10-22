@@ -79,8 +79,7 @@ begin
       using new_n, old_name;
     end if;
 
-    -- 2.3 likes：jsonb/json 用户名数组，替换其中的元素
-    -- 用 EXISTS + to_jsonb 文本比较，避免依赖 ? 操作符在动态 SQL 中的兼容性
+    -- 2.3 likes：可能是 jsonb 数组，也可能是 Postgres 原生数组 text[]，两种都处理
     if exists (
       select 1 from information_schema.columns
       where table_schema = 'public' and table_name = t.table_name
@@ -97,6 +96,16 @@ begin
            select 1 from jsonb_array_elements(likes::jsonb) as e2
            where e2::text = to_jsonb($2)::text
          )',
+        t.table_name
+      )
+      using new_n, old_name;
+    elsif exists (
+      select 1 from information_schema.columns
+      where table_schema = 'public' and table_name = t.table_name
+        and column_name = 'likes' and data_type = 'ARRAY'
+    ) then
+      execute format(
+        'update %I set likes = array_replace(likes, $2, $1) where $2 = any(likes)',
         t.table_name
       )
       using new_n, old_name;
