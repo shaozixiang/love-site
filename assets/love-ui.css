@@ -686,6 +686,7 @@ img, video { max-width: 100%; display: block; }
 /* 评分环（安全评分） */
 .lui-score-ring { position: relative; width: 108px; height: 108px; }
 .lui-score-ring svg { transform: rotate(-90deg); }
+.lui-score-ring circle { fill: none; stroke-width: 10; }
 .lui-score-ring .r-bg { stroke: var(--soft); }
 .lui-score-ring .r-fg { stroke: url(#luiRingGrad); stroke-linecap: round; transition: stroke-dashoffset 1s var(--ease); }
 .lui-score-ring .r-center {
