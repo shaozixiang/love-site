@@ -2,8 +2,7 @@ const SESSION_TTL_SECONDS = 30 * 24 * 60 * 60;
 const PASSWORD_MIN_LENGTH = 4;
 // 事件通知实例级限流表（同发布者同类型 30 秒内最多 1 封）
 const NOTIFY_RATE = new Map();
-// 登录/注册失败限流表：key -> {failures:[ts], lockUntil:ts}
-const AUTH_RATE = new Map();
+// 登录/注册失败限流：存在 site_config（跨实例共享，避免内存表在多实例下失效）
 const LOGIN_MAX_FAIL = 5;       // 5 分钟内最多 5 次失败
 const LOGIN_WINDOW_MS = 5 * 60 * 1000;
 const LOGIN_LOCK_MS = 15 * 60 * 1000;
@@ -15,26 +14,42 @@ function getClientIp(request) {
   return (request && request.headers && (request.headers.get('CF-Connecting-IP') || request.headers.get('X-Forwarded-For') || '')) || 'unknown';
 }
 
-function checkAuthRate(key, maxFail, windowMs, lockMs) {
+async function getRateState(config, key) {
+  try {
+    const rows = await supabase(config, `/site_config?key=eq.${encodeURIComponent(key)}&select=value&limit=1`, { method: 'GET' });
+    if (!rows || !rows[0]) return { failures: [], lockUntil: 0 };
+    const s = JSON.parse(rows[0].value);
+    return { failures: Array.isArray(s.failures) ? s.failures : [], lockUntil: s.lockUntil || 0 };
+  } catch (e) { return { failures: [], lockUntil: 0 }; }
+}
+
+async function setRateState(config, key, state) {
+  try { await supabase(config, '/site_config', { method: 'POST', body: { key, value: JSON.stringify(state) }, prefer: 'resolution=merge-duplicates' }); } catch (e) {}
+}
+
+async function clearRateState(config, key) {
+  try { await supabase(config, `/site_config?key=eq.${encodeURIComponent(key)}`, { method: 'DELETE' }); } catch (e) {}
+}
+
+async function checkAuthRate(config, key, maxFail, windowMs, lockMs) {
   const now = Date.now();
-  const entry = AUTH_RATE.get(key);
-  if (entry && entry.lockUntil > now) {
-    const wait = Math.ceil((entry.lockUntil - now) / 1000);
+  const state = await getRateState(config, key);
+  if (state.lockUntil > now) {
+    const wait = Math.ceil((state.lockUntil - now) / 1000);
     throw httpError(429, `尝试过于频繁，请 ${wait} 秒后再试`);
   }
-  if (entry) entry.failures = entry.failures.filter(t => now - t < windowMs);
 }
 
-function recordAuthFailure(key, windowMs, lockMs, maxFail) {
+async function recordAuthFailure(config, key, windowMs, lockMs, maxFail) {
   const now = Date.now();
-  let entry = AUTH_RATE.get(key) || { failures: [], lockUntil: 0 };
-  entry.failures.push(now);
-  entry.failures = entry.failures.filter(t => now - t < windowMs);
-  if (entry.failures.length >= maxFail) entry.lockUntil = now + lockMs;
-  AUTH_RATE.set(key, entry);
+  const state = await getRateState(config, key);
+  state.failures = (state.failures || []).filter(t => now - t < windowMs);
+  state.failures.push(now);
+  if (state.failures.length >= maxFail) state.lockUntil = now + lockMs;
+  await setRateState(config, key, state);
 }
 
-function clearAuthRate(key) { AUTH_RATE.delete(key); }
+async function clearAuthRate(config, key) { await clearRateState(config, key); }
 const USER_COLUMNS = 'username,password,password_hash,password_salt,avatar,permission,role,last_active,is_online';
 const PUBLIC_USER_COLUMNS = 'username,avatar,permission,role,last_active,is_online';
 
@@ -145,16 +160,16 @@ async function accountLog(config, action, body, result, request, error) {
 async function handleAction(config, body, request) {
   const action = String(body.action || '');
   if (action === 'login') {
-    const key = `login:${getClientIp(request)}:${cleanUsername(body.username)}`;
-    checkAuthRate(key, LOGIN_MAX_FAIL, LOGIN_WINDOW_MS, LOGIN_LOCK_MS);
-    try { const r = await login(config, body); clearAuthRate(key); return r; }
-    catch (e) { recordAuthFailure(key, LOGIN_WINDOW_MS, LOGIN_LOCK_MS, LOGIN_MAX_FAIL); throw e; }
+    const key = `rate_login_${getClientIp(request)}_${cleanUsername(body.username)}`;
+    await checkAuthRate(config, key, LOGIN_MAX_FAIL, LOGIN_WINDOW_MS, LOGIN_LOCK_MS);
+    try { const r = await login(config, body); await clearAuthRate(config, key); return r; }
+    catch (e) { await recordAuthFailure(config, key, LOGIN_WINDOW_MS, LOGIN_LOCK_MS, LOGIN_MAX_FAIL); throw e; }
   }
   if (action === 'publicRegister') {
-    const key = `register:${getClientIp(request)}`;
-    checkAuthRate(key, REG_MAX_FAIL, REG_WINDOW_MS, REG_LOCK_MS);
-    try { const r = await publicRegister(config, body); clearAuthRate(key); return r; }
-    catch (e) { recordAuthFailure(key, REG_WINDOW_MS, REG_LOCK_MS, REG_MAX_FAIL); throw e; }
+    const key = `rate_register_${getClientIp(request)}`;
+    await checkAuthRate(config, key, REG_MAX_FAIL, REG_WINDOW_MS, REG_LOCK_MS);
+    try { const r = await publicRegister(config, body); await clearAuthRate(config, key); return r; }
+    catch (e) { await recordAuthFailure(config, key, REG_WINDOW_MS, REG_LOCK_MS, REG_MAX_FAIL); throw e; }
   }
   if (action === 'track') return trackEvents(config, body, request);
 
