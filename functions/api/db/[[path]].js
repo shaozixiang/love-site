@@ -4,7 +4,20 @@
 // 再用 service role 密钥直连真实数据库（绕过 RLS）。
 // 未登录 / 无有效会话 → 一律拒绝，封死“匿名裸读数据库”漏洞。
 // 配合“所有表启用 RLS 且不开放匿名策略”，即使拿到公开 anon key 也读不到任何数据。
+//
+// 写策略（显式白名单，P0 修复）：
+// - users 表：一律拒绝（账号管理只走 /api/account）
+// - admin_logs：仅管理员 DELETE；其余拒绝
+// - site_config / bubble_config / logs：一律要求管理员
+// - bubble_photos：登录用户内容表，按 author 本人校验（与 feeds 同级）
+// - 归属表（feeds/messages/...）POST 必须 author===本人；PATCH/DELETE 仅本人或管理员
+// - feeds/messages 的 likes/comments：服务端 read-modify-write，只允许本人增删
 // ============================================================
+
+import {
+  getConfig, requireSession, checkAdmin,
+  checkAllowedOrigin, corsHeaders, jsonResponse, authHeaders
+} from '../../_lib/session.js';
 
 const ALLOWED_TABLES = new Set([
   'feeds', 'messages', 'loves', 'memories', 'memos', 'schedules', 'countdowns',
@@ -28,17 +41,34 @@ const COUPLE_USERNAMES = new Set(['boy', 'girl']);
 // users 表中绝不能通过数据代理下发的敏感列
 const SENSITIVE_USER_COLS = ['password_hash', 'password_salt', 'password'];
 
+// 含 author 归属字段的业务表：写操作须校验归属
+const OWNER_TABLES = new Set([
+  'feeds', 'messages', 'loves', 'memories', 'memos', 'schedules', 'countdowns',
+  'travel_markers', 'angry_mode', 'apologies', 'bubble_photos'
+]);
+// 系统/共享表：POST/PATCH/DELETE 一律要求管理员（P0-01）
+// bubble_photos 是情侣双方内容（带 author 列），走 OWNER 本人校验
+const ADMIN_ONLY_TABLES = new Set(['site_config', 'bubble_config', 'logs']);
+
 export async function onRequest(context) {
   const { request, env } = context;
   const origin = request.headers.get('Origin') || '';
+  const originCheck = checkAllowedOrigin(origin, env.ACCOUNT_ALLOWED_ORIGINS || env.UPLOAD_ALLOWED_ORIGINS);
   if (request.method === 'OPTIONS') {
-    return new Response(null, { status: 204, headers: corsHeaders(origin) });
+    if (!originCheck.allowed) return jsonResponse({ error: 'Origin is not allowed.' }, 403);
+    return new Response(null, {
+      status: 204,
+      headers: corsHeaders(originCheck.corsOrigin, {
+        methods: 'GET, POST, PATCH, DELETE, OPTIONS',
+        headers: 'Content-Type, Prefer, X-Couple-Token'
+      })
+    });
   }
   try {
     const config = getConfig(env);
     if (!config.ok) return jsonResponse({ error: config.error }, 500);
 
-    // 1. 会话校验：没有有效登录会话，一律拒绝
+    // 1. 会话校验：没有有效登录会话（含账号已删除），一律拒绝
     const token = request.headers.get('X-Couple-Token') || '';
     let session;
     try { session = await requireSession(config, token); }
@@ -52,7 +82,7 @@ export async function onRequest(context) {
     if (!ALLOWED_TABLES.has(table)) return jsonResponse({ error: '该数据表不允许直接访问' }, 403);
 
     const method = request.method;
-    const body = (method === 'GET' || method === 'HEAD') ? undefined : await request.text();
+    let body = (method === 'GET' || method === 'HEAD') ? undefined : await request.text();
 
     // 角色只判定一次（管理员/情侣账号）
     const isAdmin = await checkAdmin(config, session.username);
@@ -65,9 +95,11 @@ export async function onRequest(context) {
       }
     }
 
-    // 2.5 写操作权限校验：只能删/改自己的内容（admin 例外），评论点赞交互放行
-    try { await enforceWritePolicy(config, session, method, table, url.search, body); }
-    catch (e) { return jsonResponse({ error: e.message || '无权操作' }, 403); }
+    // 2.5 写操作权限校验：只能删/改自己的内容（admin 例外），评论点赞交互走服务端原子化
+    try {
+      const writeResult = await enforceWritePolicy(config, session, method, table, url.search, body);
+      if (writeResult && writeResult.replacementBody !== undefined) body = JSON.stringify(writeResult.replacementBody);
+    } catch (e) { return jsonResponse({ error: e.message || '无权操作' }, 403); }
 
     // 3. 用 service role 转发到真实 Supabase（service role 绕过 RLS）
     // 读取请求在服务端强制注入行级条件（S2）：无论前端 select 哪些列、带什么参数，
@@ -115,18 +147,9 @@ export async function onRequest(context) {
   }
 }
 
-// 含 author 归属字段的业务表：写操作须校验归属
-const OWNER_TABLES = new Set([
-  'feeds', 'messages', 'loves', 'memories', 'memos', 'schedules', 'countdowns',
-  'travel_markers', 'angry_mode', 'apologies'
-]);
-// 系统/共享表：POST 放行（登录即可），PATCH 放行，DELETE 仅管理员
-const SHARED_TABLES = new Set([
-  'bubble_config', 'bubble_photos', 'admin_logs', 'site_config', 'users', 'logs'
-]);
-
+// 返回 null 表示原样转发；返回 {replacementBody} 表示用服务端重写后的请求体转发
 async function enforceWritePolicy(config, session, method, table, search, bodyText) {
-  if (method === 'GET' || method === 'HEAD') return;
+  if (method === 'GET' || method === 'HEAD') return null;
 
   // users 表：任何写操作一律拒绝（S1 提权）。账号创建/改密/改角色只能走 /api/account 专用接口
   if (table === 'users') {
@@ -137,52 +160,114 @@ async function enforceWritePolicy(config, session, method, table, search, bodyTe
   if (table === 'admin_logs') {
     if (method === 'DELETE') {
       if (!(await checkAdmin(config, session.username))) throw new Error('仅管理员可清空操作日志');
-      return;
+      return null;
     }
     throw new Error('操作日志不允许写入或修改');
   }
 
+  // site_config / bubble_config / logs：一律要求管理员（P0-01）
+  if (ADMIN_ONLY_TABLES.has(table)) {
+    if (!(await checkAdmin(config, session.username))) throw new Error('该表不允许普通用户写入');
+    return null;
+  }
+
+  const isAdmin = await checkAdmin(config, session.username);
+
   // POST：归属表必须用当前用户身份发布，防止冒充他人
   if (method === 'POST') {
-    if (OWNER_TABLES.has(table)) {
-      let payload = {};
-      try { payload = JSON.parse(bodyText || '{}'); } catch (e) { throw new Error('请求体无效'); }
-      const author = String(payload.author || '');
-      if (!author) throw new Error('缺少发布者');
-      if (author !== session.username) throw new Error('无权以他人身份发布');
-    }
-    return;
+    if (!OWNER_TABLES.has(table)) throw new Error('无权写入该数据表');
+    let payload = {};
+    try { payload = JSON.parse(bodyText || '{}'); } catch (e) { throw new Error('请求体无效'); }
+    const author = String(payload.author || '');
+    if (!author) throw new Error('缺少发布者');
+    if (author !== session.username) throw new Error('无权以他人身份发布');
+    return null;
   }
-  // PATCH / DELETE
-  const isAdmin = await checkAdmin(config, session.username);
-  if (isAdmin) return;
+
+  // PATCH / DELETE：管理员放行
+  if (isAdmin) return null;
+
   const idMatch = String(search || '').match(/id=eq\.([^&]+)/);
   if (!idMatch) throw new Error('缺少记录 ID');
-  const id = decodeURIComponent(idMatch[1]);
-  const cols = OWNER_TABLES.has(table) ? 'author' : 'id';
-  const qUrl = `${config.supabaseUrl}/rest/v1/${table}?select=${cols}&id=eq.${encodeURIComponent(id)}&limit=1`;
-  const qResp = await fetch(qUrl, { headers: authHeaders(config) });
-  const qRows = await qResp.json().catch(() => null);
-  if (!Array.isArray(qRows) || qRows.length === 0) throw new Error('记录不存在');
-  // 评论/点赞交互：对他人内容更新 comments / likes 数组放行
+
+  // 评论/点赞交互（P0-02/P1-04）：服务端 read-modify-write，只允许本人增删，
+  // 校验通过后以库内数组为基准应用该增/删再发给 PostgREST（顺带修并发丢赞）
   if (method === 'PATCH' && (table === 'feeds' || table === 'messages')) {
     let payload = {};
     try { payload = JSON.parse(bodyText || '{}'); } catch (e) { throw new Error('请求体无效'); }
     const keys = Object.keys(payload);
-    if (keys.length && keys.every(k => k === 'comments' || k === 'likes')) return;
+    if (keys.length && keys.every(k => k === 'comments' || k === 'likes')) {
+      return await sanitizeInteractionPatch(config, session, table, idMatch[1], payload);
+    }
   }
-  if (OWNER_TABLES.has(table)) {
-    if (qRows[0].author === session.username) return;
-    throw new Error('只能操作自己发布的内容');
-  }
-  throw new Error('无权操作该数据');
-}
 
-async function checkAdmin(config, username) {
-  const qUrl = `${config.supabaseUrl}/rest/v1/users?select=role&username=eq.${encodeURIComponent(username)}&limit=1`;
+  // 其余 PATCH/DELETE：归属表仅本人
+  const qUrl = `${config.supabaseUrl}/rest/v1/${table}?select=author&id=eq.${encodeURIComponent(decodeURIComponent(idMatch[1]))}&limit=1`;
   const qResp = await fetch(qUrl, { headers: authHeaders(config) });
   const qRows = await qResp.json().catch(() => null);
-  return Array.isArray(qRows) && qRows.length > 0 && (qRows[0].role === 'admin' || String(username).toLowerCase() === 'admin');
+  if (!Array.isArray(qRows) || qRows.length === 0) throw new Error('记录不存在');
+  if (qRows[0].author === session.username) return null;
+  throw new Error('只能操作自己发布的内容');
+}
+
+// 点赞/评论原子化重写：以库内当前数组为基准，只允许会话本人的项发生变化
+async function sanitizeInteractionPatch(config, session, table, idRaw, payload) {
+  const id = decodeURIComponent(idRaw);
+  const me = session.username;
+  const rowResp = await fetch(
+    `${config.supabaseUrl}/rest/v1/${table}?select=likes,comments&id=eq.${encodeURIComponent(id)}&limit=1`,
+    { headers: authHeaders(config) }
+  );
+  const rows = await rowResp.json().catch(() => null);
+  if (!Array.isArray(rows) || rows.length === 0) throw new Error('记录不存在');
+  const dbLikes = Array.isArray(rows[0].likes) ? rows[0].likes : [];
+  const dbComments = Array.isArray(rows[0].comments) ? rows[0].comments : [];
+  const out = {};
+
+  if (payload.likes !== undefined) {
+    const clientLikes = payload.likes;
+    if (!Array.isArray(clientLikes)) throw new Error('点赞数据格式不正确');
+    if (new Set(clientLikes).size !== clientLikes.length) throw new Error('点赞数据格式不正确');
+    // 客户端相对库内数组的差异：只能是“增/删本人一项”
+    const added = clientLikes.filter(x => !dbLikes.includes(x));
+    const removed = dbLikes.filter(x => !clientLikes.includes(x));
+    if (added.length > 1 || removed.length > 1) throw new Error('只能增删自己的点赞');
+    if (added.some(x => x !== me) || removed.some(x => x !== me)) throw new Error('只能增删自己的点赞');
+    if (added.length === 0 && removed.length === 0) {
+      out.likes = dbLikes; // 无变化：原样写回库内数组
+    } else {
+      // 以库内数组为基准应用该增/删（其他人的项原样保留）
+      out.likes = dbLikes.filter(x => x !== me);
+      if (added.length) out.likes.push(me);
+    }
+  }
+
+  if (payload.comments !== undefined) {
+    const clientComments = payload.comments;
+    if (!Array.isArray(clientComments)) throw new Error('评论数据格式不正确');
+    const norm = (c) => JSON.stringify(c && typeof c === 'object' ? c : {}, Object.keys(c || {}).sort());
+    const dbNorms = dbComments.map(norm);
+    // 逐个配对：client 中在库内找不到的元素 = 新增；库内未被匹配的元素 = 删除
+    const dbUsed = new Array(dbComments.length).fill(false);
+    const addedClient = [];
+    for (const c of clientComments) {
+      const idx = dbNorms.findIndex((n, i) => !dbUsed[i] && n === norm(c));
+      if (idx >= 0) dbUsed[idx] = true; else addedClient.push(c);
+    }
+    const removedDb = dbComments.filter((_, i) => !dbUsed[i]);
+    if (addedClient.length > 1 || removedDb.length > 1) throw new Error('只能增删自己的评论');
+    for (const c of addedClient) {
+      if (!c || typeof c !== 'object' || String(c.author || '') !== me) throw new Error('只能发布自己的评论');
+    }
+    for (const c of removedDb) {
+      const author = String((c && c.author) || '');
+      if (author !== me && !(await checkAdmin(config, me))) throw new Error('只能删除自己的评论');
+    }
+    // 以库内数组为基准：未变化的评论原样保留，新增评论前置
+    out.comments = addedClient.concat(dbComments.filter((_, i) => dbUsed[i]));
+  }
+
+  return { replacementBody: out };
 }
 
 // 读取结果按角色过滤（S2，出口纵深防御，正常情况下入口 buildSafeSearch 已保证）：
@@ -235,7 +320,8 @@ function buildSafeSearch(url, table, method, username, isAdmin, isCouple) {
   if (method !== 'GET' && method !== 'HEAD') return url.search;
   const params = new URLSearchParams(url.search);
   const andParts = [];
-  const safeName = /^[A-Za-z0-9_-]{1,32}$/.test(String(username)) ? username : '';
+  // 用户名字符集与改名字符集一致（P2-07）
+  const safeName = /^[A-Za-z0-9_.-]{1,64}$/.test(String(username)) ? username : '';
 
   // 1) 软删除表：强制只返回未删除记录（回收站走独立 /api/trash）
   if (SOFT_DELETE_TABLES.has(table)) {
@@ -275,10 +361,6 @@ function buildSafeSearch(url, table, method, username, isAdmin, isCouple) {
   return s ? '?' + s : '';
 }
 
-function authHeaders(config) {
-  return { apikey: config.serviceKey, Authorization: `Bearer ${config.serviceKey}`, 'Content-Type': 'application/json' };
-}
-
 // 把数据库写操作翻译成人类可读的日志动作名
 const TABLE_CN = {
   feeds: '相册', messages: '留言', loves: '心动', memories: '回忆', memos: '待办',
@@ -308,61 +390,4 @@ function describeDbAction(method, table, bodyText) {
     return '编辑' + cn;
   }
   return cn + '操作';
-}
-
-// ---------- 以下为会话校验与辅助函数（与 /api/account 同一套实现） ----------
-
-async function requireSession(config, token) {
-  const value = String(token || '');
-  const parts = value.split('.');
-  if (parts.length !== 2) throw new Error('登录已失效');
-  const expected = await hmac(config.sessionSecret, parts[0]);
-  if (!constantTimeEqual(expected, parts[1])) throw new Error('登录已失效');
-  let payload;
-  try { payload = JSON.parse(base64UrlDecode(parts[0])); } catch (_) { throw new Error('登录已失效'); }
-  if (!payload.u || payload.exp < Math.floor(Date.now() / 1000)) throw new Error('登录已失效');
-  return { username: payload.u };
-}
-
-async function hmac(secret, message) {
-  const key = await crypto.subtle.importKey('raw', new TextEncoder().encode(secret), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
-  return arrayBufferToHex(await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(message)));
-}
-
-function getConfig(env) {
-  const supabaseUrl = String(env.SUPABASE_URL || '').replace(/\/$/, '');
-  const serviceKey = env.SUPABASE_SERVICE_ROLE_KEY || env.SUPABASE_SERVICE_KEY;
-  const sessionSecret = env.AUTH_SESSION_SECRET || serviceKey;
-  if (!supabaseUrl) return { ok: false, error: 'SUPABASE_URL is not configured.' };
-  if (!serviceKey) return { ok: false, error: 'SUPABASE_SERVICE_ROLE_KEY is not configured.' };
-  if (!sessionSecret) return { ok: false, error: 'AUTH_SESSION_SECRET is not configured.' };
-  return { ok: true, supabaseUrl, serviceKey, sessionSecret };
-}
-
-function corsHeaders(origin) {
-  const headers = { 'Access-Control-Allow-Methods': 'GET, POST, PATCH, DELETE, OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type, Prefer, X-Couple-Token', Vary: 'Origin' };
-  if (origin) headers['Access-Control-Allow-Origin'] = origin;
-  return headers;
-}
-
-function jsonResponse(payload, status) {
-  return new Response(JSON.stringify(payload), { status, headers: { 'Content-Type': 'application/json; charset=utf-8' } });
-}
-
-function arrayBufferToHex(buffer) {
-  return Array.from(new Uint8Array(buffer), value => value.toString(16).padStart(2, '0')).join('');
-}
-
-function base64UrlDecode(value) {
-  const padded = value.replace(/-/g, '+').replace(/_/g, '/') + '==='.slice((value.length + 3) % 4);
-  return decodeURIComponent(escape(atob(padded)));
-}
-
-function constantTimeEqual(a, b) {
-  a = String(a || '');
-  b = String(b || '');
-  if (a.length !== b.length) return false;
-  let diff = 0;
-  for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
-  return diff === 0;
 }

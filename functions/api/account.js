@@ -1,5 +1,12 @@
-const SESSION_TTL_SECONDS = 30 * 24 * 60 * 60;
-const PASSWORD_MIN_LENGTH = 4;
+import {
+  getConfig, signSession, requireSession as sharedRequireSession,
+  checkAllowedOrigin, corsHeaders, jsonResponse,
+  arrayBufferToHex, constantTimeEqual, randomHex
+} from '../_lib/session.js';
+
+const PASSWORD_MIN_LENGTH = 8;   // 注册/改密/重置最小长度（登录路径不做长度校验，保证老账号照常登录）
+const PBKDF2_ITERATIONS = 120000;
+const AVATAR_MAX_BYTES = 500 * 1024;
 // 事件通知实例级限流表（同发布者同类型 30 秒内最多 1 封）
 const NOTIFY_RATE = new Map();
 // 登录/注册失败限流：存在 site_config（跨实例共享，避免内存表在多实例下失效）
@@ -56,7 +63,7 @@ const PUBLIC_USER_COLUMNS = 'username,avatar,permission,role,last_active,is_onli
 export async function onRequest(context) {
   const { request, env } = context;
   const originCheck = checkAllowedOrigin(request.headers.get('Origin') || '', env.ACCOUNT_ALLOWED_ORIGINS || env.UPLOAD_ALLOWED_ORIGINS);
-  const headers = corsHeaders(originCheck.corsOrigin);
+  const headers = corsHeaders(originCheck.corsOrigin, { methods: 'POST, OPTIONS', headers: 'Content-Type' });
 
   if (!originCheck.allowed) return jsonResponse({ error: 'Account origin is not allowed.' }, 403, headers);
   if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers });
@@ -414,6 +421,11 @@ async function changeUsername(config, username, body) {
 async function updateAvatar(config, username, avatar) {
   const value = String(avatar || '');
   if (!value.startsWith('data:image/')) throw httpError(400, '头像格式不正确');
+  // P2-01：限制 base64 解码后体积 ≤500KB，避免膨胀 users 表与 me 接口响应
+  const b64 = value.slice(value.indexOf(',') + 1);
+  const padding = b64.endsWith('==') ? 2 : (b64.endsWith('=') ? 1 : 0);
+  const decodedBytes = Math.floor((b64.length * 3) / 4) - padding;
+  if (decodedBytes > AVATAR_MAX_BYTES) throw httpError(400, '头像过大：请使用 500KB 以内的图片');
   return { user: sanitizeUser(await patchUser(config, username, { avatar: value })) };
 }
 
@@ -647,15 +659,51 @@ async function buildPasswordFields(config, password) {
   return { password_hash: await hashPassword(config, password, salt), password_salt: salt };
 }
 
-async function verifyPassword(config, password, user) {
-  if (user.password_hash && user.password_salt) return constantTimeEqual(await hashPassword(config, password, user.password_salt), user.password_hash);
-  return String(user.password || '') === password;
+// 新格式：PBKDF2-HMAC-SHA256（WebCrypto，12 万次迭代），形如 pbkdf2$iter$salt$hash
+async function hashPassword(config, password, salt) {
+  const keyMaterial = await crypto.subtle.importKey('raw', new TextEncoder().encode(password), { name: 'PBKDF2' }, false, ['deriveBits']);
+  const bits = await crypto.subtle.deriveBits(
+    { name: 'PBKDF2', salt: new TextEncoder().encode(salt), iterations: PBKDF2_ITERATIONS, hash: 'SHA-256' },
+    keyMaterial, 256
+  );
+  return `pbkdf2$${PBKDF2_ITERATIONS}$${salt}$${arrayBufferToHex(bits)}`;
 }
 
-async function hashPassword(config, password, salt) {
+// 旧格式：快速 SHA-256(salt:password:secret)，形如 sha256$salt$hash
+async function legacyHash(config, password, salt) {
   const bytes = new TextEncoder().encode(`${salt}:${password}:${config.sessionSecret}`);
   const digest = await crypto.subtle.digest('SHA-256', bytes);
   return `sha256$${salt}$${arrayBufferToHex(digest)}`;
+}
+
+async function verifyPassword(config, password, user) {
+  if (user.password_hash && user.password_salt) {
+    const stored = String(user.password_hash);
+    if (stored.startsWith('pbkdf2$')) {
+      const parts = stored.split('$');
+      const iter = parseInt(parts[1], 10) || PBKDF2_ITERATIONS;
+      const ok = await hashPasswordWithIter(password, parts[2] || user.password_salt, iter);
+      return constantTimeEqual(ok, stored);
+    }
+    if (stored.startsWith('sha256$')) {
+      if (!constantTimeEqual(await legacyHash(config, password, user.password_salt), stored)) return false;
+      // 透明升级为 PBKDF2（不阻断登录；失败静默）
+      try { await updatePassword(config, user.username, password); } catch (e) {}
+      return true;
+    }
+    return false;
+  }
+  // 极早期明文兜底（兼容老数据）
+  return String(user.password || '') === password;
+}
+
+async function hashPasswordWithIter(password, salt, iterations) {
+  const keyMaterial = await crypto.subtle.importKey('raw', new TextEncoder().encode(password), { name: 'PBKDF2' }, false, ['deriveBits']);
+  const bits = await crypto.subtle.deriveBits(
+    { name: 'PBKDF2', salt: new TextEncoder().encode(salt), iterations, hash: 'SHA-256' },
+    keyMaterial, 256
+  );
+  return `pbkdf2$${iterations}$${salt}$${arrayBufferToHex(bits)}`;
 }
 
 function sanitizeUser(user) {
@@ -687,41 +735,13 @@ async function supabase(config, path, options) {
   return data;
 }
 
-async function signSession(config, username) {
-  const now = Math.floor(Date.now() / 1000);
-  const payload = { u: username, iat: now, exp: now + SESSION_TTL_SECONDS, n: randomHex(8) };
-  const encoded = base64UrlEncode(JSON.stringify(payload));
-  return `${encoded}.${await hmac(config.sessionSecret, encoded)}`;
-}
-
+// 共享会话实现（HMAC + 过期 + users 存活校验）；本地包装成 401 httpError，保持原行为
 async function requireSession(config, token) {
-  const value = String(token || '');
-  const parts = value.split('.');
-  if (parts.length !== 2) throw httpError(401, '登录已失效，请重新登录');
-  const expected = await hmac(config.sessionSecret, parts[0]);
-  if (!constantTimeEqual(expected, parts[1])) throw httpError(401, '登录已失效，请重新登录');
-  let payload;
-  try { payload = JSON.parse(base64UrlDecode(parts[0])); } catch (_) { throw httpError(401, '登录已失效，请重新登录'); }
-  if (!payload.u || payload.exp < Math.floor(Date.now() / 1000)) throw httpError(401, '登录已失效，请重新登录');
-  // 防幽灵令牌：账号被删除后，旧 token 立即失效
-  const alive = await fetchUser(config, payload.u, 'username');
-  if (!alive) throw httpError(401, '登录已失效，请重新登录');
-  return { username: payload.u };
-}
-
-async function hmac(secret, message) {
-  const key = await crypto.subtle.importKey('raw', new TextEncoder().encode(secret), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
-  return arrayBufferToHex(await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(message)));
-}
-
-function getConfig(env) {
-  const supabaseUrl = String(env.SUPABASE_URL || '').replace(/\/$/, '');
-  const serviceKey = env.SUPABASE_SERVICE_ROLE_KEY || env.SUPABASE_SERVICE_KEY;
-  const sessionSecret = env.AUTH_SESSION_SECRET || serviceKey;
-  if (!supabaseUrl) return { ok: false, error: 'SUPABASE_URL is not configured.' };
-  if (!serviceKey) return { ok: false, error: 'SUPABASE_SERVICE_ROLE_KEY is not configured.' };
-  if (!sessionSecret) return { ok: false, error: 'AUTH_SESSION_SECRET is not configured.' };
-  return { ok: true, supabaseUrl, serviceKey, sessionSecret };
+  try {
+    return await sharedRequireSession(config, token);
+  } catch (e) {
+    throw httpError(401, '登录已失效，请重新登录');
+  }
 }
 
 function healthPayload(env) {
@@ -733,24 +753,6 @@ function healthPayload(env) {
     hasServiceRoleKey: !!(env.SUPABASE_SERVICE_ROLE_KEY || env.SUPABASE_SERVICE_KEY),
     hasSessionSecret: !!env.AUTH_SESSION_SECRET
   };
-}
-
-function corsHeaders(origin) {
-  const headers = { 'Access-Control-Allow-Methods': 'POST, OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type', Vary: 'Origin' };
-  if (origin) headers['Access-Control-Allow-Origin'] = origin;
-  return headers;
-}
-
-function checkAllowedOrigin(origin, allowedOriginsConfig) {
-  const allowedOrigins = String(allowedOriginsConfig || '').split(',').map(item => item.trim()).filter(Boolean);
-  if (allowedOrigins.length === 0) return { allowed: true, corsOrigin: '*' };
-  if (!origin) return { allowed: true, corsOrigin: allowedOrigins[0] };
-  const allowed = allowedOrigins.includes(origin);
-  return { allowed, corsOrigin: allowed ? origin : '' };
-}
-
-function jsonResponse(payload, status, headers) {
-  return new Response(JSON.stringify(payload), { status, headers: { ...headers, 'Content-Type': 'application/json; charset=utf-8' } });
 }
 
 function assertPassword(password) {
@@ -765,32 +767,4 @@ function httpError(status, message) {
   const error = new Error(message);
   error.status = status;
   return error;
-}
-
-function randomHex(bytes) {
-  const values = new Uint8Array(bytes);
-  crypto.getRandomValues(values);
-  return Array.from(values, value => value.toString(16).padStart(2, '0')).join('');
-}
-
-function arrayBufferToHex(buffer) {
-  return Array.from(new Uint8Array(buffer), value => value.toString(16).padStart(2, '0')).join('');
-}
-
-function base64UrlEncode(value) {
-  return btoa(unescape(encodeURIComponent(value))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
-}
-
-function base64UrlDecode(value) {
-  const padded = value.replace(/-/g, '+').replace(/_/g, '/') + '==='.slice((value.length + 3) % 4);
-  return decodeURIComponent(escape(atob(padded)));
-}
-
-function constantTimeEqual(a, b) {
-  a = String(a || '');
-  b = String(b || '');
-  if (a.length !== b.length) return false;
-  let diff = 0;
-  for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
-  return diff === 0;
 }

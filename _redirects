@@ -1,0 +1,8 @@
+# 敏感目录/测试页禁止公开发布（Cloudflare Pages 语法）
+# 注意：不要拦截 /assets/ /lib/ /api/(Pages Functions) /app/
+/sql/*   /404   404
+/docs/*  /404   404
+/scripts/* /404 404
+/tests/* /404   404
+/private-test.html /404 404
+/index.txt /404 404

@@ -1,0 +1,52 @@
+name: 定时安全扫描（每两天）
+
+# UTC 03:00 = 北京时间 11:00；每 2 天一次；另支持 Actions 页面手动触发
+on:
+  schedule:
+    - cron: '0 3 */2 * *'
+  workflow_dispatch: {}
+
+permissions:
+  contents: write   # 需要把安全报告提交回仓库 docs/security-reports/
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: 检出仓库
+        uses: actions/checkout@v4
+
+      - name: 安装 Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: 运行安全扫描（只读探测，退出码反映结论）
+        env:
+          SITE_URL: https://love-site-2am.pages.dev
+          SUPABASE_URL: https://txeynuvttibnilvttieu.supabase.co
+          # publishable(anon) key 本就公开写在前端与 keepalive.yml，RLS 才是安全边界
+          SUPABASE_ANON_KEY: sb_publishable_Z8E9qPbi6F2NLzoQh9fhfw__goWiZZ4
+          # 可选 secret：注入后 Service 面（Storage 桶 / users.password 列残留）才会被实际探测
+          SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          # 可选 secret：检查私密图仓是否为 private；不给则用内置 GITHUB_TOKEN（仅主仓）
+          IMAGE_REPO_TOKEN: ${{ secrets.IMAGE_REPO_TOKEN }}
+          GITHUB_OWNER: shaozixiang
+          GITHUB_IMG_REPO: couple-images
+          GITHUB_BRANCH: main
+          GITHUB_MAIN_REPO: love-site
+        run: node scripts/run-security-scan.mjs
+
+      - name: 提交安全报告
+        run: |
+          set -u
+          git config user.name "security-bot"
+          git config user.email "security-bot@users.noreply.github.com"
+          git add docs/security-reports/
+          if git diff --cached --quiet; then
+            echo "没有新报告，跳过提交"
+            exit 0
+          fi
+          git commit -m "chore: 自动安全扫描报告 $(date -u +%Y%m%d-%H%M)"
+          git push

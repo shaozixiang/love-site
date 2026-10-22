@@ -6,7 +6,13 @@
 //   restore 管理员：图片移回原目录，记录恢复显示
 //   purge   管理员：彻底删除 GitHub 文件 + 物理删除数据库记录
 // 设计：数据库记录始终保留原始图片路径；文件在 原路径 <-> trash/原路径 之间移动。
+// 注：DB 与 GitHub 两侧非事务，单侧失败时向 admin_logs 补写 trash_compensation_needed 告警。
 // ============================================================
+
+import {
+  getConfig as baseConfig, requireSession, checkAdmin,
+  checkAllowedOrigin, corsHeaders, jsonResponse, readCookie, authHeaders
+} from '../_lib/session.js';
 
 // 各内容表配置：type 中文名、title 摘要、medias 提取媒体 URL 列表
 const TABLES = {
@@ -24,7 +30,11 @@ const TABLES = {
 export async function onRequest(context) {
   const { request, env } = context;
   const origin = request.headers.get('Origin') || '';
-  if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: corsHeaders(origin) });
+  const originCheck = checkAllowedOrigin(origin, env.ACCOUNT_ALLOWED_ORIGINS || env.UPLOAD_ALLOWED_ORIGINS);
+  if (request.method === 'OPTIONS') {
+    if (!originCheck.allowed) return jsonResponse({ error: 'Origin is not allowed.' }, 403);
+    return new Response(null, { status: 204, headers: corsHeaders(originCheck.corsOrigin, { methods: 'POST, OPTIONS' }) });
+  }
   if (request.method !== 'POST') return jsonResponse({ error: 'Method not allowed' }, 405);
 
   try {
@@ -87,12 +97,18 @@ export async function onRequest(context) {
         const r = await gitMove(cfg, pairs);
         if (!r.ok) return jsonResponse({ error: '图片移入回收站失败：' + r.error }, 502);
         moved = r.moved;
+        // 文件已移动：顺手清掉 img 代理边缘缓存，原路径尽快返回 404（P1-05）
+        await purgeImgCache(rels.map(rel => '/' + rel).concat(rels.map(rel => '/trash/' + rel)));
       }
-      const patched = await sbQuery(cfg, `${table}?id=eq.${encodeURIComponent(id)}`, {
+      const patched = await sbExec(cfg, `${table}?id=eq.${encodeURIComponent(id)}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json', Prefer: 'return=minimal' },
         body: JSON.stringify({ deleted_at: new Date().toISOString(), deleted_by: session.username })
       });
+      if (!patched.ok) {
+        // 单侧失败：文件已进 trash 但 DB 未打标 → 补写可追踪告警，不阻断主流程
+        await compensate(cfg, 'delete_patch_failed', table, id, rels, session.username, request);
+      }
       await trashLog(cfg, '移入回收站·' + TABLES[table].type, session.username, { module: table, id, files: rels.length, title: String(TABLES[table].title(row) || '').slice(0, 60) }, request);
       return jsonResponse({ ok: true, moved }, 200);
     }
@@ -106,12 +122,17 @@ export async function onRequest(context) {
         const pairs = rels.map(rel => ({ from: 'trash/' + rel, to: rel }));
         const r = await gitMove(cfg, pairs);
         if (!r.ok) return jsonResponse({ error: '图片恢复失败：' + r.error }, 502);
+        await purgeImgCache(rels.map(rel => '/' + rel).concat(rels.map(rel => '/trash/' + rel)));
       }
-      await sbQuery(cfg, `${table}?id=eq.${encodeURIComponent(id)}`, {
+      const restored = await sbExec(cfg, `${table}?id=eq.${encodeURIComponent(id)}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json', Prefer: 'return=minimal' },
         body: JSON.stringify({ deleted_at: null, deleted_by: null })
       });
+      if (!restored.ok) {
+        // 单侧失败：文件已移回但 DB 仍标删除 → 补写告警
+        await compensate(cfg, 'restore_patch_failed', table, id, rels, session.username, request);
+      }
       await trashLog(cfg, '从回收站恢复·' + TABLES[table].type, session.username, { module: table, id, files: rels.length }, request);
       return jsonResponse({ ok: true }, 200);
     }
@@ -123,8 +144,13 @@ export async function onRequest(context) {
         const targets = rels.map(rel => (inTrash ? 'trash/' + rel : rel));
         const r = await gitDelete(cfg, targets);
         if (!r.ok) return jsonResponse({ error: '文件删除失败：' + r.error }, 502);
+        await purgeImgCache(rels.map(rel => '/' + rel).concat(rels.map(rel => '/trash/' + rel)));
       }
-      await sbQuery(cfg, `${table}?id=eq.${encodeURIComponent(id)}`, { method: 'DELETE' });
+      const deleted = await sbExec(cfg, `${table}?id=eq.${encodeURIComponent(id)}`, { method: 'DELETE' });
+      if (!deleted.ok) {
+        // 单侧失败：文件已删但 DB 行仍在（孤儿行）→ 补写告警
+        await compensate(cfg, 'purge_delete_failed', table, id, rels, session.username, request);
+      }
       await trashLog(cfg, '彻底删除·' + TABLES[table].type, session.username, { module: table, id, files: rels.length }, request);
       return jsonResponse({ ok: true }, 200);
     }
@@ -242,16 +268,22 @@ function safeRel(rel) {
 async function sbQuery(cfg, qs, opts = {}) {
   const resp = await fetch(`${cfg.supabaseUrl}/rest/v1/${qs}`, {
     method: opts.method || 'GET',
-    headers: {
-      apikey: cfg.serviceKey,
-      Authorization: `Bearer ${cfg.serviceKey}`,
-      'Content-Type': 'application/json',
-      ...(opts.headers || {})
-    },
+    headers: authHeaders(cfg),
+    ...(opts.headers ? { headers: { ...authHeaders(cfg), ...opts.headers } } : {}),
     body: opts.body
   });
   const txt = await resp.text();
   try { return txt ? JSON.parse(txt) : null; } catch (_) { return null; }
+}
+
+// 关键写操作专用：返回状态，便于发现单侧失败（P2-03 补偿）
+async function sbExec(cfg, qs, opts = {}) {
+  const resp = await fetch(`${cfg.supabaseUrl}/rest/v1/${qs}`, {
+    method: opts.method || 'GET',
+    headers: { ...authHeaders(cfg), ...(opts.headers || {}) },
+    body: opts.body
+  });
+  return { ok: resp.ok, status: resp.status };
 }
 
 // 回收站操作服务端日志（带真实 IP/UA，防伪造；失败静默）
@@ -271,67 +303,32 @@ async function trashLog(cfg, action, username, details, request) {
   } catch (e) {}
 }
 
-async function checkAdmin(cfg, username) {
-  const rows = await sbQuery(cfg, `users?select=role&username=eq.${encodeURIComponent(username)}&limit=1`);
-  return Array.isArray(rows) && rows.length > 0 && (rows[0].role === 'admin' || String(username).toLowerCase() === 'admin');
+// P2-03：DB 与 GitHub 单侧失败时补写可追踪告警，不阻断主流程
+async function compensate(cfg, step, table, id, rels, username, request) {
+  await trashLog(cfg, 'trash_compensation_needed', username, {
+    step, table, id, files: (rels || []).length,
+    note: 'DB 与 GitHub 两侧不一致，需人工核对回收站记录'
+  }, request);
 }
 
-// ============================================================
-// 会话校验（与 /api/account、/api/db 同一套）
-// ============================================================
-async function requireSession(cfg, token) {
-  const value = String(token || '');
-  const parts = value.split('.');
-  if (parts.length !== 2) throw new Error('登录已失效');
-  const expected = await hmac(cfg.sessionSecret, parts[0]);
-  if (!constantTimeEqual(expected, parts[1])) throw new Error('登录已失效');
-  let payload;
-  try { payload = JSON.parse(base64UrlDecode(parts[0])); } catch (_) { throw new Error('登录已失效'); }
-  if (!payload.u || payload.exp < Math.floor(Date.now() / 1000)) throw new Error('登录已失效');
-  return { username: payload.u };
+// P1-05：清掉 /api/img 边缘缓存里受影响的代理 URL（失败静默）
+async function purgeImgCache(relPaths) {
+  try {
+    const cache = caches.default;
+    if (!cache || !cache.delete) return;
+    for (const rel of relPaths) {
+      await cache.delete(new Request(`https://img-cache.local${rel}`));
+    }
+  } catch (e) {}
 }
-async function hmac(secret, message) {
-  const key = await crypto.subtle.importKey('raw', new TextEncoder().encode(secret), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
-  return arrayBufferToHex(await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(message)));
-}
+
 function getConfig(env) {
-  const supabaseUrl = String(env.SUPABASE_URL || '').replace(/\/$/, '');
-  const serviceKey = env.SUPABASE_SERVICE_ROLE_KEY || env.SUPABASE_SERVICE_KEY;
-  const sessionSecret = env.AUTH_SESSION_SECRET || serviceKey;
+  const base = baseConfig(env);
+  if (!base.ok) return { ok: false, error: '数据库未配置' };
   const owner = String(env.GITHUB_IMG_OWNER || env.GITHUB_OWNER || '');
   const repo = String(env.GITHUB_IMG_REPO1 || env.GITHUB_IMG_REPO || env.GITHUB_REPO || '');
   const branch = String(env.GITHUB_IMG_BRANCH || env.GITHUB_BRANCH || 'main');
   const ghToken = String(env.GITHUB_IMG_TOKEN || env.GITHUB_TOKEN || '');
-  if (!supabaseUrl || !serviceKey) return { ok: false, error: '数据库未配置' };
   if (!owner || !repo || !ghToken) return { ok: false, error: '图片仓库未配置' };
-  return { ok: true, supabaseUrl, serviceKey, sessionSecret, owner, repo, branch, ghToken };
-}
-function readCookie(cookieHeader, name) {
-  for (const part of String(cookieHeader || '').split(';')) {
-    const pair = part.trim().split('=');
-    if (pair[0] === name) return decodeURIComponent(pair.slice(1).join('='));
-  }
-  return '';
-}
-function corsHeaders(origin) {
-  const headers = { 'Access-Control-Allow-Methods': 'POST, OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type, X-Couple-Token', Vary: 'Origin' };
-  if (origin) headers['Access-Control-Allow-Origin'] = origin;
-  return headers;
-}
-function jsonResponse(payload, status) {
-  return new Response(JSON.stringify(payload), { status, headers: { 'Content-Type': 'application/json; charset=utf-8' } });
-}
-function arrayBufferToHex(buffer) {
-  return Array.from(new Uint8Array(buffer), v => v.toString(16).padStart(2, '0')).join('');
-}
-function base64UrlDecode(value) {
-  const padded = value.replace(/-/g, '+').replace(/_/g, '/') + '==='.slice((value.length + 3) % 4);
-  return decodeURIComponent(escape(atob(padded)));
-}
-function constantTimeEqual(a, b) {
-  a = String(a || ''); b = String(b || '');
-  if (a.length !== b.length) return false;
-  let diff = 0;
-  for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
-  return diff === 0;
+  return { ...base, owner, repo, branch, ghToken };
 }
