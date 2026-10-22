@@ -803,6 +803,14 @@ img, video { max-width: 100%; display: block; }
 .lui-fade-up { animation: lui-fade-up .35s var(--ease) both; }
 .rotate-spin { animation: lui-spin 1s linear infinite; }
 
+/* ---------- 16. 文件选择（替代原生丑按钮） ---------- */
+.lui-filepick { display: flex; align-items: center; gap: 8px; width: 100%; padding: 11px 14px; border: 1.5px dashed var(--line-2); border-radius: var(--r-md); background: var(--rose-tint); color: var(--ink-2); font-size: var(--f-sub); font-weight: 600; cursor: pointer; transition: border-color .15s var(--ease), background .15s var(--ease); }
+.lui-filepick:hover { border-color: var(--rose); }
+.lui-filepick:active { background: var(--rose-tint-2); }
+.lui-filepick input[type=file] { display: none; }
+.lui-filepick .fp-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lui-filepick .lui-icon { color: var(--rose); flex: none; }
+
 @media (prefers-reduced-motion: reduce) {
     *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; }
 }

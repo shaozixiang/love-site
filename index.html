@@ -3,13 +3,13 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <meta name="version" content="20261022c">
+    <meta name="version" content="20261022d">
     <title>我们的专属小站</title>
-    <link rel="stylesheet" href="assets/love-ui.css?v=20261022c">
+    <link rel="stylesheet" href="assets/love-ui.css?v=20261022d">
     <link rel="stylesheet" href="/lib/leaflet.css?v=20261011a">
     <script defer src="/lib/leaflet.js?v=20261011a"></script>
     <script defer src="/lib/supabase.min.js?v=20261011a"></script>
-    <script defer src="/lib/app.js?v=20261022c"></script>
+    <script defer src="/lib/app.js?v=20261022d"></script>
     <style>
     /* ===== 页面专属样式：只允许使用 love-ui.css 的 token，禁止硬编码颜色 ===== */
     body { overflow-x: hidden; }
@@ -263,7 +263,7 @@
                 <div class="lui-card">
                     <div class="lui-card-head"><div class="lui-badge-icon"><svg class="lui-icon"><use href="assets/icons.svg#i-message"/></svg></div><div><h3>给 TA 的悄悄话</h3><div class="sub">写下此刻想说的话</div></div></div>
                     <div class="lui-field"><textarea class="lui-textarea" id="messageInput" placeholder="想对 TA 说什么…"></textarea></div>
-                    <div class="lui-field"><input type="file" id="messagePhotoInput" accept="image/*"><div id="messagePhotoPreview" style="margin-top:8px;"></div></div>
+                    <div class="lui-field"><label class="lui-filepick" for="messagePhotoInput"><svg class="lui-icon s16"><use href="assets/icons.svg#i-photo"/></svg><span class="fp-name" id="messagePhotoName">添加照片（可选）</span><input type="file" id="messagePhotoInput" accept="image/*" onchange="var n=document.getElementById('messagePhotoName');if(n)n.textContent=this.files.length?this.files[0].name:'添加照片（可选）';"></label><div id="messagePhotoPreview" style="margin-top:10px;"></div></div>
                     <button class="lui-btn primary block submit-btn" id="msgSubmitBtn" onclick="addMessageWithPhoto()"><svg class="lui-icon"><use href="assets/icons.svg#i-send"/></svg>发送留言</button>
                 </div>
                 <div id="messageList"></div>
@@ -415,7 +415,7 @@
     <div id="avatarModal" class="lui-overlay center">
         <div class="lui-modal">
             <div class="m-title"><span class="lui-badge-icon"><svg class="lui-icon"><use href="assets/icons.svg#i-camera"/></svg></span>修改头像</div>
-            <div class="lui-field"><input type="file" id="avatarInput" accept="image/*"></div>
+            <div class="lui-field"><label class="lui-filepick" for="avatarInput"><svg class="lui-icon s16"><use href="assets/icons.svg#i-photo"/></svg><span class="fp-name" id="avatarName">选择头像图片</span><input type="file" id="avatarInput" accept="image/*" onchange="var n=document.getElementById('avatarName');if(n)n.textContent=this.files.length?this.files[0].name:'选择头像图片';"></label></div>
             <button class="lui-btn primary block" onclick="updateAvatar()">保存头像</button>
         </div>
     </div>
