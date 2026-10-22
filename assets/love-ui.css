@@ -815,3 +815,7 @@ img, video { max-width: 100%; display: block; }
 @media (prefers-reduced-motion: reduce) {
     *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; }
 }
+
+/* 地图自定义标记：去除 Leaflet 默认 PNG 依赖 */
+.lui-map-pin { background: transparent; border: none; }
+.lui-map-pin svg { display: block; filter: drop-shadow(0 3px 4px rgba(176,52,92,.35)); }
