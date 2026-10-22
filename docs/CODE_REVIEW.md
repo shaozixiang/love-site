@@ -300,3 +300,39 @@
 - [ ] `api/upload-to-github.js` 等死代码已删除或归档
 - [ ] 版本戳 `?v=2026xxxx` 已 bump，避免旧 JS 缓存
 - [ ] keepalive workflow 最近一次运行成功（保活 Supabase 免费版）
+
+---
+
+## 附录 C：修复状态总表（2026-10-22 收尾，已随 main 部署）
+
+| 编号 | 问题 | 状态 | 修复位置 / 说明 |
+|---|---|---|---|
+| P0-01 | 越权写 site_config/bubble_* | ✅ 已修 | `db/[[path]].js` 写表白名单 + 显式 ADMIN_ONLY_TABLES；非 OWNER 表 POST 一律拒绝。curl 实测普通账号 403 |
+| P0-02 | 点赞/评论整列覆盖 | ✅ 已修 | `sanitizeInteractionPatch()` 服务端 read-modify-write，以库内数组为基准，只允许增删本人点赞/评论。**管理员也不再绕过**（E2E 实测修复，陈旧覆盖已拦截） |
+| P1-01 | 上传 GitHub API 容量/1MB 限制 | ✅ 已修 | 上传改 Git Data API（blob→tree→commit），图片 10MB/视频 30MB；img 代理改 raw.githubusercontent.com 透传 Range |
+| P1-02 | XSS 引号转义不全 | ✅ 已修 | 两版 `escapeHtml` 升级为 `& < > " '` 五字符，属性上下文全覆盖 |
+| P1-03 | 道歉/生气模式作者名直拼 | ✅ 已修 | mode.by / a.fromName / 点赞用户名全部转义 + textContent；旧缓存名 stripNameEmoji |
+| P1-04 | 点赞并发竞态 | ✅ 已修 | 同 P0-02，原子化后无丢失 |
+| P1-05 | 图片边缘缓存旧字节 | ✅ 已修 | 分级 TTL（图 1h/视频 1d）+ trash 删除主动 purge；命中缓存 Range 切片 206 |
+| P1-06 | 改名级联不全 | ⚠️ 需手动 SQL | `sql/rename-cascade-supplement.sql`（comments.authorName + by 列），用户在 SQL Editor 执行 |
+| P1-07 | 幽灵令牌仍可用 | ✅ 已修 | 抽 `functions/_lib/session.js`，所有端点校验 HMAC+过期+users 存活 |
+| P2-01 | 超大 base64 头像 | ✅ 已修 | account.js 解码后 >500KB 拒绝 |
+| P2-02 | 口令强度/哈希 | ✅ 已修 | 最小 8 位（登录路径不校验）；PBKDF2-SHA256 12 万次，旧 SHA256 透明升级 |
+| P2-03 | 回收站单侧失败无补偿 | ✅ 已修 | trash.js 任一步失败写 admin_logs（trash_compensation_needed） |
+| P2-04 | CORS 预检回显任意外域 | ✅ 已修 | 预检也走白名单，恶意 Origin 403 无 ACAO |
+| P2-05 | Service Worker 缓存 /api | ✅ 已修 | app/sw.js `/api/` network only，仅 `/api/img/` cache-first |
+| P2-07 | 改名正则不一致 | ✅ 已修 | db 代理 safeName 与前端统一 `[A-Za-z0-9_.-]{1,64}` |
+| P2-08 | localStorage 缓存写爆 | ✅ 已修 | 写失败按 syncedAt 淘汰最旧 section 缓存后重试 |
+| P3-02 | 旧 api/ 死代码、私测文件 | ✅ 已修 | 删旧 api/，index.txt/private-test.html 入 archive/，敏感目录 functions 404 |
+| P3-03 | 硬编码 owner | ✅ 已修 | env 优先，兜底保留 |
+| P3-04 | 会话逻辑重复 | ✅ 已修 | 统一 `_lib/session.js` |
+| — | users.password 明文凭据列 | ⚠️ 需手动 SQL | `sql/final-maintenance-20261022.sql` 步骤 1（DROP COLUMN），本地无 service 凭据无法执行 |
+| — | couple-media 公开桶 | ⚠️ 需手动 SQL | 同上步骤 2（改私有），业务实际不用此桶 |
+| — | CSP unsafe-inline | ⏸ 已接受 | 全站 inline onclick 架构所致，已有同源+转义+防 CSRF 兜底，结项不重构 |
+| — | Cookie 非 HttpOnly | ⏸ 已接受 | 前端需读 cookie 走图片代理，架构权衡；令牌有效期 30 天 + HMAC |
+| — | 图片/视频冷回源慢 | ⏸ 已优化 | 私仓 + 跨太平洋 raw 回源固有；已用边缘分级缓存/Range 切片/骨架占位缓解，首次仍慢，重复访问秒开。彻底解决需迁移到 R2/CDN（可选，见安全监控文档） |
+
+### 附录 C 备注
+- 所有"✅ 已修"均已 `node --check` 通过、push main 部署，并经 API 级（curl）或浏览器真机走查验证。
+- 三个"⚠️ 需手动 SQL"为本地无 service_role 连接凭据，无法代为执行；文件幂等，按 `final-maintenance → monitoring_rpcs → rename-cascade` 顺序执行后，安全评分预期升至约 94/A（仅剩 CSP 一项）。
+- 已确认：旧密码账号 doubaotest/doubao、test/0000 登录完全兼容（哈希透明升级）。
