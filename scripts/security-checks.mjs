@@ -302,12 +302,21 @@ export async function runSecurityChecks(cfg) {
     const imgRepoRes = await getHeaders(cfg, `https://api.github.com/repos/${cfg.githubOwner}/${cfg.githubImgRepo}`, ghHeaders);
     let imgRepo = {};
     try { imgRepo = JSON.parse(await imgRepoRes.text()); } catch (_) {}
+    const imgReachable = imgRepoRes.status === 200;
+    const imgStatus = imgReachable
+      ? (imgRepo.private === true ? 'pass' : 'fail')
+      : ([401, 403, 404].includes(imgRepoRes.status) ? 'unknown' : 'fail');
+    const imgDetail = imgReachable
+      ? (imgRepo.private === true
+          ? `${cfg.githubImgRepo} 为 private（size=${imgRepo.size}KB）`
+          : `${cfg.githubImgRepo} 为 PUBLIC（HTTP 200）——私密照片不得放在公开仓！`)
+      : ([401, 403, 404].includes(imgRepoRes.status)
+          ? `Token 无权访问 ${cfg.githubImgRepo}（HTTP ${imgRepoRes.status}）；内置 GITHUB_TOKEN 无法跨仓读取，需配置 IMAGE_REPO_TOKEN`
+          : `HTTP ${imgRepoRes.status}`);
     checks.push(check('GH-IMAGE-REPO-PRIVATE', 'GitHub面', '私密图仓必须为 private',
-      'high', imgRepo.private === true ? 'pass' : 'fail',
-      imgRepo.private === true
-        ? `${cfg.githubImgRepo} 为 private（size=${imgRepo.size}KB）`
-        : `图仓 private=${imgRepo.private}（HTTP ${imgRepoRes.status}）——私密照片不得放在公开仓！`,
-      '立即把仓库切换为 private，并轮换可能泄露的文件'));
+      'high', imgStatus, imgDetail,
+      imgStatus === 'fail' ? '立即把仓库切换为 private，并轮换可能泄露的文件'
+        : '在 GitHub Actions secrets 配置 IMAGE_REPO_TOKEN（couple-images 只读）后自动检测'));
 
     // 主仓文件树抽查密钥文件
     const main = cfg.mainRepo || 'love-site';

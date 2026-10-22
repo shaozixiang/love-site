@@ -32,6 +32,8 @@ jobs:
           SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           # 可选 secret：检查私密图仓是否为 private；不给则用内置 GITHUB_TOKEN（仅主仓）
           IMAGE_REPO_TOKEN: ${{ secrets.IMAGE_REPO_TOKEN }}
+          # 内置 GITHUB_TOKEN 显式传入（可读取主仓；私密图仓需另配 IMAGE_REPO_TOKEN）
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_OWNER: shaozixiang
           GITHUB_IMG_REPO: couple-images
           GITHUB_BRANCH: main
