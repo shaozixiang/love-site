@@ -1,0 +1,459 @@
+{
+  "generatedAt": "2026-10-22T10:01:09.991Z",
+  "summary": {
+    "score": 95,
+    "grade": "A",
+    "high": 0,
+    "medium": 1,
+    "low": 2,
+    "info": 1,
+    "passes": 37,
+    "fails": 0,
+    "warns": 3,
+    "unknowns": 8,
+    "total": 49
+  },
+  "checks": [
+    {
+      "id": "STATIC-SECRETS",
+      "category": "静态代码",
+      "title": "源码/配置中不得硬编码密钥",
+      "severity": "high",
+      "status": "pass",
+      "detail": "未发现硬编码的 service_role key / PAT / 云厂商 key",
+      "fix": "把命中的密钥移入环境变量/secrets，并轮换已泄露的密钥"
+    },
+    {
+      "id": "STATIC-ADMIN-LEAK",
+      "category": "静态代码",
+      "title": "错误文案不应泄露管理员账号特征",
+      "severity": "low",
+      "status": "warn",
+      "detail": "命中 28 处：archive/private-test.html:23; archive/private-test.html:26; archive/private-test.html:982; archive/private-test.html:1022; functions/api/account.js:274",
+      "fix": "错误文案统一为“无权操作/未登录”，不暴露管理员角色名"
+    },
+    {
+      "id": "STATIC-INNERHTML",
+      "category": "静态代码",
+      "title": "前端 innerHTML 使用数量",
+      "severity": "low",
+      "status": "warn",
+      "detail": "app/lib/ 与 HTML 中共 204 处 innerHTML 赋值（需人工确认均不拼接用户输入）",
+      "fix": "用户内容一律用 textContent，或做转义白名单"
+    },
+    {
+      "id": "STATIC-WORKFLOW-PERM",
+      "category": "静态代码",
+      "title": "GitHub Actions 显式声明最小权限",
+      "severity": "medium",
+      "status": "pass",
+      "detail": "security-scan.yml 已显式声明 permissions",
+      "fix": "在 workflow 顶部声明 permissions: contents: write"
+    },
+    {
+      "id": "STATIC-HEADERS-FILE",
+      "category": "静态代码",
+      "title": "_headers 包含完整安全头",
+      "severity": "medium",
+      "status": "pass",
+      "detail": "_headers 含 CSP/HSTS 等",
+      "fix": "补齐 CSP/HSTS/X-Frame-Options 等"
+    },
+    {
+      "id": "STATIC-SW-API-CACHE",
+      "category": "静态代码",
+      "title": "Service Worker 不得缓存 API 响应",
+      "severity": "medium",
+      "status": "pass",
+      "detail": "SW 未缓存 /api/",
+      "fix": "SW 的 fetch 拦截里对 /api/ 直接 bypassNetwork"
+    },
+    {
+      "id": "HDR-CSP",
+      "category": "HTTP安全头",
+      "title": "响应包含 Content-Security-Policy",
+      "severity": "high",
+      "status": "pass",
+      "detail": "已下发 CSP：default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' https: data: blob:; media-src 'self' https: data: blob:;",
+      "fix": "在 Cloudflare Pages _headers 增加 Content-Security-Policy 策略"
+    },
+    {
+      "id": "HDR-CSP-UNSAFE-INLINE",
+      "category": "HTTP安全头",
+      "title": "CSP script-src 不应包含 unsafe-inline",
+      "severity": "medium",
+      "status": "warn",
+      "detail": "当前 script-src 含 unsafe-inline，内联脚本可被注入执行",
+      "fix": "把内联脚本抽到外部 js 文件，改用 nonce/hash 模式收紧 script-src"
+    },
+    {
+      "id": "HDR-OBJECT-SRC",
+      "category": "HTTP安全头",
+      "title": "CSP 限定 object-src",
+      "severity": "medium",
+      "status": "pass",
+      "detail": "已声明 object-src",
+      "fix": "增加 object-src 'none'"
+    },
+    {
+      "id": "HDR-BASE-URI",
+      "category": "HTTP安全头",
+      "title": "CSP 限定 base-uri",
+      "severity": "medium",
+      "status": "pass",
+      "detail": "已声明 base-uri",
+      "fix": "增加 base-uri 'self'"
+    },
+    {
+      "id": "HDR-FORM-ACTION",
+      "category": "HTTP安全头",
+      "title": "CSP 限定 form-action",
+      "severity": "low",
+      "status": "pass",
+      "detail": "已声明 form-action",
+      "fix": "增加 form-action 'self'"
+    },
+    {
+      "id": "HDR-FRAME-ANCESTORS",
+      "category": "HTTP安全头",
+      "title": "CSP 禁止被第三方 iframe 嵌套",
+      "severity": "high",
+      "status": "pass",
+      "detail": "已声明 frame-ancestors",
+      "fix": "增加 frame-ancestors 'none'（或同时保留 X-Frame-Options: DENY）"
+    },
+    {
+      "id": "HDR-HSTS",
+      "category": "HTTP安全头",
+      "title": "启用 HSTS 强制 HTTPS",
+      "severity": "high",
+      "status": "pass",
+      "detail": "max-age=31536000; includeSubDomains",
+      "fix": "增加 Strict-Transport-Security: max-age=31536000; includeSubDomains"
+    },
+    {
+      "id": "HDR-XFO",
+      "category": "HTTP安全头",
+      "title": "X-Frame-Options 或 frame-ancestors 防嵌套",
+      "severity": "medium",
+      "status": "pass",
+      "detail": "DENY",
+      "fix": "增加 X-Frame-Options: DENY"
+    },
+    {
+      "id": "HDR-XCTO",
+      "category": "HTTP安全头",
+      "title": "MIME 嗅探保护",
+      "severity": "low",
+      "status": "pass",
+      "detail": "nosniff",
+      "fix": "增加 X-Content-Type-Options: nosniff"
+    },
+    {
+      "id": "HDR-REFERRER",
+      "category": "HTTP安全头",
+      "title": "Referrer-Policy 防地址泄露",
+      "severity": "low",
+      "status": "pass",
+      "detail": "strict-origin-when-cross-origin",
+      "fix": "增加 Referrer-Policy: strict-origin-when-cross-origin"
+    },
+    {
+      "id": "HDR-PERMISSIONS",
+      "category": "HTTP安全头",
+      "title": "权限策略收紧敏感能力",
+      "severity": "low",
+      "status": "pass",
+      "detail": "geolocation=(self), camera=(), microphone=()",
+      "fix": "增加 Permissions-Policy: camera=(), microphone=(), geolocation=(self)"
+    },
+    {
+      "id": "CORS--api-account",
+      "category": "CORS",
+      "title": "恶意 Origin 不得被 /api/account 放行",
+      "severity": "low",
+      "status": "pass",
+      "detail": "状态 403，ACAO=(未下发)",
+      "fix": ""
+    },
+    {
+      "id": "CORS--api-db-rest-v--users",
+      "category": "CORS",
+      "title": "恶意 Origin 不得被 /api/db/rest/v1/users 放行",
+      "severity": "low",
+      "status": "pass",
+      "detail": "状态 401，ACAO=(未下发)",
+      "fix": ""
+    },
+    {
+      "id": "CORS--api-upload-to-github",
+      "category": "CORS",
+      "title": "恶意 Origin 不得被 /api/upload-to-github 放行",
+      "severity": "low",
+      "status": "pass",
+      "detail": "状态 405，ACAO=*",
+      "fix": ""
+    },
+    {
+      "id": "CORS--api-trash",
+      "category": "CORS",
+      "title": "恶意 Origin 不得被 /api/trash 放行",
+      "severity": "low",
+      "status": "pass",
+      "detail": "状态 405，ACAO=(未下发)",
+      "fix": ""
+    },
+    {
+      "id": "CORS--api-monitor",
+      "category": "CORS",
+      "title": "恶意 Origin 不得被 /api/monitor 放行",
+      "severity": "low",
+      "status": "pass",
+      "detail": "状态 403，ACAO=(未下发)",
+      "fix": ""
+    },
+    {
+      "id": "CORS--api-security-scan",
+      "category": "CORS",
+      "title": "恶意 Origin 不得被 /api/security-scan 放行",
+      "severity": "low",
+      "status": "pass",
+      "detail": "状态 403，ACAO=(未下发)",
+      "fix": ""
+    },
+    {
+      "id": "CORS-PREFLIGHT",
+      "category": "CORS",
+      "title": "OPTIONS 预检不得回显恶意 Origin",
+      "severity": "medium",
+      "status": "pass",
+      "detail": "预检未回显恶意 Origin（ACAO=(无)）",
+      "fix": ""
+    },
+    {
+      "id": "RLS-TABLES",
+      "category": "RLS数据面",
+      "title": "anon key 对 16 张业务表只读探测（不得返回数据）",
+      "severity": "high",
+      "status": "pass",
+      "detail": "全部 16 张表对 anon 均返回空数组/拒绝，RLS 生效",
+      "fix": ""
+    },
+    {
+      "id": "RLS-OPENAPI",
+      "category": "RLS数据面",
+      "title": "PostgREST OpenAPI 根不对 anon 暴露",
+      "severity": "medium",
+      "status": "pass",
+      "detail": "OpenAPI 根要求 secret key，anon 不可见",
+      "fix": ""
+    },
+    {
+      "id": "RLS-STORAGE",
+      "category": "RLS数据面",
+      "title": "anon 不得列出 Storage 桶（空列表视为 RLS 生效）",
+      "severity": "medium",
+      "status": "pass",
+      "detail": "状态 200（期望 401/403 或空列表；当前为空，RLS 生效）",
+      "fix": ""
+    },
+    {
+      "id": "AUTH-DB-LOGS",
+      "category": "服务端鉴权",
+      "title": "无会话访问 /api/db/rest/v1/admin_logs?select=*&limit=1 必须被拒绝",
+      "severity": "high",
+      "status": "pass",
+      "detail": "状态 401（期望 401/403）",
+      "fix": ""
+    },
+    {
+      "id": "AUTH-TRASH",
+      "category": "服务端鉴权",
+      "title": "无会话访问 /api/trash 必须被拒绝",
+      "severity": "high",
+      "status": "pass",
+      "detail": "状态 401（期望 401/403）",
+      "fix": ""
+    },
+    {
+      "id": "AUTH-MONITOR",
+      "category": "服务端鉴权",
+      "title": "无会话访问 /api/monitor 必须被拒绝",
+      "severity": "high",
+      "status": "pass",
+      "detail": "状态 401（期望 401/403）",
+      "fix": ""
+    },
+    {
+      "id": "AUTH-SCAN-GET",
+      "category": "服务端鉴权",
+      "title": "无会话访问 /api/security-scan 必须被拒绝",
+      "severity": "high",
+      "status": "pass",
+      "detail": "状态 401（期望 401/403）",
+      "fix": ""
+    },
+    {
+      "id": "AUTH-SCAN-POST",
+      "category": "服务端鉴权",
+      "title": "无会话访问 /api/security-scan 必须被拒绝",
+      "severity": "high",
+      "status": "pass",
+      "detail": "状态 401（期望 401/403）",
+      "fix": ""
+    },
+    {
+      "id": "AUTH-UPLOAD",
+      "category": "服务端鉴权",
+      "title": "无会话访问 /api/upload-to-github 必须被拒绝",
+      "severity": "high",
+      "status": "pass",
+      "detail": "状态 401（期望 401/403）",
+      "fix": ""
+    },
+    {
+      "id": "ENV-SESSION-SECRET",
+      "category": "会话配置",
+      "title": "AUTH_SESSION_SECRET 独立配置（非复用 service key）",
+      "severity": "high",
+      "status": "unknown",
+      "detail": "Actions 侧无法读取运行时环境（记 unknown）；若未配置会退化为复用 service_role 签发会话",
+      "fix": "在 Cloudflare Pages 单独设置 AUTH_SESSION_SECRET（随机长串）"
+    },
+    {
+      "id": "ENV-CONFIG-COMPLETE",
+      "category": "会话配置",
+      "title": "必需的运行时环境变量齐备",
+      "severity": "high",
+      "status": "unknown",
+      "detail": "supabaseUrl=✓ serviceRoleKey=✗（仅报告布尔值）",
+      "fix": "Cloudflare Pages 补齐 SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY"
+    },
+    {
+      "id": "ENV-ORIGINS",
+      "category": "会话配置",
+      "title": "上传/账号接口配置了 Origin 白名单",
+      "severity": "low",
+      "status": "unknown",
+      "detail": "未配置白名单，当前仅靠同源判断兜底",
+      "fix": "配置 UPLOAD_ALLOWED_ORIGINS / ACCOUNT_ALLOWED_ORIGINS"
+    },
+    {
+      "id": "COOKIE-FLAGS",
+      "category": "会话配置",
+      "title": "登录 Cookie 标志（HttpOnly/Secure/SameSite）人工复核",
+      "severity": "low",
+      "status": "info",
+      "detail": "出于安全纪律，本扫描不尝试真实登录、不观察 Set-Cookie；请人工确认 couple_t 为 HttpOnly+Secure+SameSite=Lax",
+      "fix": "登录成功后 curl -i 查看 Set-Cookie 属性"
+    },
+    {
+      "id": "GH-IMAGE-REPO-PRIVATE",
+      "category": "GitHub面",
+      "title": "私密图仓必须为 private",
+      "severity": "high",
+      "status": "unknown",
+      "detail": "未配置 GITHUB_TOKEN，无法读取仓库元信息",
+      "fix": "在 Cloudflare Pages 配置 GITHUB_TOKEN（repo 只读 scope），Actions 配置 IMAGE_REPO_TOKEN"
+    },
+    {
+      "id": "GH-MAIN-REPO-SECRETS",
+      "category": "GitHub面",
+      "title": "主仓不得提交 .dev.vars/wrangler.toml 等密钥文件",
+      "severity": "high",
+      "status": "unknown",
+      "detail": "未配置 GITHUB_TOKEN，无法抽查主仓文件树",
+      "fix": "配置 GITHUB_TOKEN 后自动检查"
+    },
+    {
+      "id": "GH-WORKFLOW-PERMISSIONS",
+      "category": "GitHub面",
+      "title": "GitHub Actions 默认权限最小化",
+      "severity": "medium",
+      "status": "unknown",
+      "detail": "请人工确认 .github/workflows 已声明 permissions: contents: read（本扫描的静态检查项会补充）",
+      "fix": ""
+    },
+    {
+      "id": "SB-STORAGE-BUCKETS",
+      "category": "Supabase面",
+      "title": "Storage 桶公开情况",
+      "severity": "medium",
+      "status": "unknown",
+      "detail": "Actions 侧不持有 service_role key，跳过（Function 侧扫描自动补检）",
+      "fix": ""
+    },
+    {
+      "id": "SB-USERS-PASSWORD-COLUMN",
+      "category": "Supabase面",
+      "title": "users 表不得残留明文 password 列",
+      "severity": "high",
+      "status": "unknown",
+      "detail": "Actions 侧不持有 service_role key，跳过",
+      "fix": ""
+    },
+    {
+      "id": "SB-OPEN-SIGNUP",
+      "category": "Supabase面",
+      "title": "GoTrue 注册端点状态",
+      "severity": "medium",
+      "status": "pass",
+      "detail": "GET /auth/v1/signup 状态 405（本站账号体系在 /api/account，不使用 GoTrue；生产应保持拒绝开放注册）",
+      "fix": "Dashboard → Authentication → Providers 关闭 Email 注册"
+    },
+    {
+      "id": "EXP-GIT",
+      "category": "暴露面",
+      "title": "/.git/config 不得泄露",
+      "severity": "high",
+      "status": "pass",
+      "detail": "状态 200（未泄露 git 内容）",
+      "fix": ""
+    },
+    {
+      "id": "EXP-DEVVARS",
+      "category": "暴露面",
+      "title": "/.dev.vars 不得泄露",
+      "severity": "high",
+      "status": "pass",
+      "detail": "状态 200（未泄露，命中为 SPA 回退页）",
+      "fix": ""
+    },
+    {
+      "id": "EXP-SQL-DIR",
+      "category": "暴露面",
+      "title": "sql/ 迁移脚本不得被公开发布",
+      "severity": "medium",
+      "status": "pass",
+      "detail": "状态 404（未泄露）",
+      "fix": ""
+    },
+    {
+      "id": "EXP-HTTPS",
+      "category": "暴露面",
+      "title": "站点强制 HTTPS",
+      "severity": "high",
+      "status": "pass",
+      "detail": "siteUrl=https://love-site-2am.pages.dev",
+      "fix": "Pages 默认即 HTTPS；配合 HSTS 完成闭环"
+    },
+    {
+      "id": "IMG-TRAVERSAL",
+      "category": "图床代理",
+      "title": "/api/img 路径穿越必须被拒绝",
+      "severity": "high",
+      "status": "pass",
+      "detail": "状态 400（期望 400/401/403/404）",
+      "fix": ""
+    },
+    {
+      "id": "IMG-NOAUTH",
+      "category": "图床代理",
+      "title": "/api/img 无会话必须 401",
+      "severity": "high",
+      "status": "pass",
+      "detail": "状态 401（期望 401/403）",
+      "fix": ""
+    }
+  ]
+}
