@@ -2,6 +2,39 @@ const SESSION_TTL_SECONDS = 30 * 24 * 60 * 60;
 const PASSWORD_MIN_LENGTH = 4;
 // 事件通知实例级限流表（同发布者同类型 30 秒内最多 1 封）
 const NOTIFY_RATE = new Map();
+// 登录/注册失败限流表：key -> {failures:[ts], lockUntil:ts}
+const AUTH_RATE = new Map();
+const LOGIN_MAX_FAIL = 5;       // 5 分钟内最多 5 次失败
+const LOGIN_WINDOW_MS = 5 * 60 * 1000;
+const LOGIN_LOCK_MS = 15 * 60 * 1000;
+const REG_MAX_FAIL = 3;         // 10 分钟内最多 3 次失败
+const REG_WINDOW_MS = 10 * 60 * 1000;
+const REG_LOCK_MS = 30 * 60 * 1000;
+
+function getClientIp(request) {
+  return (request && request.headers && (request.headers.get('CF-Connecting-IP') || request.headers.get('X-Forwarded-For') || '')) || 'unknown';
+}
+
+function checkAuthRate(key, maxFail, windowMs, lockMs) {
+  const now = Date.now();
+  const entry = AUTH_RATE.get(key);
+  if (entry && entry.lockUntil > now) {
+    const wait = Math.ceil((entry.lockUntil - now) / 1000);
+    throw httpError(429, `尝试过于频繁，请 ${wait} 秒后再试`);
+  }
+  if (entry) entry.failures = entry.failures.filter(t => now - t < windowMs);
+}
+
+function recordAuthFailure(key, windowMs, lockMs, maxFail) {
+  const now = Date.now();
+  let entry = AUTH_RATE.get(key) || { failures: [], lockUntil: 0 };
+  entry.failures.push(now);
+  entry.failures = entry.failures.filter(t => now - t < windowMs);
+  if (entry.failures.length >= maxFail) entry.lockUntil = now + lockMs;
+  AUTH_RATE.set(key, entry);
+}
+
+function clearAuthRate(key) { AUTH_RATE.delete(key); }
 const USER_COLUMNS = 'username,password,password_hash,password_salt,avatar,permission,role,last_active,is_online';
 const PUBLIC_USER_COLUMNS = 'username,avatar,permission,role,last_active,is_online';
 
@@ -111,8 +144,18 @@ async function accountLog(config, action, body, result, request, error) {
 
 async function handleAction(config, body, request) {
   const action = String(body.action || '');
-  if (action === 'login') return login(config, body);
-  if (action === 'publicRegister') return publicRegister(config, body);
+  if (action === 'login') {
+    const key = `login:${getClientIp(request)}:${cleanUsername(body.username)}`;
+    checkAuthRate(key, LOGIN_MAX_FAIL, LOGIN_WINDOW_MS, LOGIN_LOCK_MS);
+    try { const r = await login(config, body); clearAuthRate(key); return r; }
+    catch (e) { recordAuthFailure(key, LOGIN_WINDOW_MS, LOGIN_LOCK_MS, LOGIN_MAX_FAIL); throw e; }
+  }
+  if (action === 'publicRegister') {
+    const key = `register:${getClientIp(request)}`;
+    checkAuthRate(key, REG_MAX_FAIL, REG_WINDOW_MS, REG_LOCK_MS);
+    try { const r = await publicRegister(config, body); clearAuthRate(key); return r; }
+    catch (e) { recordAuthFailure(key, REG_WINDOW_MS, REG_LOCK_MS, REG_MAX_FAIL); throw e; }
+  }
   if (action === 'track') return trackEvents(config, body, request);
 
   const session = await requireSession(config, body.sessionToken);
@@ -135,6 +178,7 @@ async function handleAction(config, body, request) {
   if (action === 'setNotifySwitches') return requireAdminThen(config, session.username, () => setNotifySwitches(config, body));
   if (action === 'setUserEmail') return requireAdminThen(config, session.username, () => setUserEmail(config, body));
   if (action === 'setSignupCode') return requireAdminThen(config, session.username, () => setSignupCode(config, body));
+  if (action === 'setRegisterOpen') return requireAdminThen(config, session.username, () => setRegisterOpen(config, body));
   if (action === 'getSignupCode') return requireAdminThen(config, session.username, () => getSignupCode(config));
   if (action === 'getBubbleConfig') return requireAdminThen(config, session.username, () => getBubbleConfig(config));
   if (action === 'setBubbleConfig') return requireAdminThen(config, session.username, () => setBubbleConfig(config, body));
@@ -189,21 +233,25 @@ async function createUser(config, body) {
   return { user: sanitizeUser(row) };
 }
 
-// 登录页公开注册：不需要登录，但必须持有管理员在后台设置的"注册邀请码"
-// 未设置 signup_code 时通道默认关闭，避免私密小站被陌生人自助注册
+// 登录页公开注册：不需要登录
+// 两种模式：①管理员开启"开放注册"则无需邀请码；②否则必须持有管理员设置的邀请码
 async function publicRegister(config, body) {
   const username = cleanUsername(body.username);
   const password = String(body.password || '');
   const inviteCode = String(body.inviteCode || '').trim();
   if (!username || !password) throw httpError(400, '请填写账号和密码');
-  if (!inviteCode) throw httpError(400, '请填写注册邀请码');
   assertPassword(password);
 
   let m = {};
   try { m = await getSiteValues(config); } catch (e) { throw httpError(400, '注册服务暂不可用，请稍后再试'); }
+  const registerOpen = m.register_open === '1' || m.register_open === 'true' || m.register_open === true;
   const signupCode = String(m.signup_code || '').trim();
-  if (!signupCode) throw httpError(403, '注册通道未开通，请联系管理员');
-  if (inviteCode !== signupCode) throw httpError(403, '邀请码不正确');
+
+  if (!registerOpen) {
+    if (!inviteCode) throw httpError(400, '请填写注册邀请码');
+    if (!signupCode) throw httpError(403, '注册通道未开通，请联系管理员');
+    if (inviteCode !== signupCode) throw httpError(403, '邀请码不正确');
+  }
 
   if (await fetchUser(config, username, PUBLIC_USER_COLUMNS)) throw httpError(409, '账号已存在');
   const passwordData = await buildPasswordFields(config, password);
@@ -229,8 +277,17 @@ async function setSignupCode(config, body) {
 
 async function getSignupCode(config) {
   let m = {};
-  try { m = await getSiteValues(config); } catch (e) { return { code: '' }; }
-  return { code: m.signup_code || '' };
+  try { m = await getSiteValues(config); } catch (e) { return { code: '', register_open: false }; }
+  return {
+    code: m.signup_code || '',
+    register_open: m.register_open === '1' || m.register_open === 'true' || m.register_open === true
+  };
+}
+
+async function setRegisterOpen(config, body) {
+  const open = body.open === true || body.open === '1' || body.open === 'true';
+  await setSiteValue(config, 'register_open', open ? '1' : '0');
+  return { ok: true, register_open: open };
 }
 
 async function getBubbleConfig(config) {
@@ -631,6 +688,9 @@ async function requireSession(config, token) {
   let payload;
   try { payload = JSON.parse(base64UrlDecode(parts[0])); } catch (_) { throw httpError(401, '登录已失效，请重新登录'); }
   if (!payload.u || payload.exp < Math.floor(Date.now() / 1000)) throw httpError(401, '登录已失效，请重新登录');
+  // 防幽灵令牌：账号被删除后，旧 token 立即失效
+  const alive = await fetchUser(config, payload.u, 'username');
+  if (!alive) throw httpError(401, '登录已失效，请重新登录');
   return { username: payload.u };
 }
 
