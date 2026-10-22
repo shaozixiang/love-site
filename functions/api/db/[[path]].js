@@ -184,14 +184,12 @@ async function enforceWritePolicy(config, session, method, table, search, bodyTe
     return null;
   }
 
-  // PATCH / DELETE：管理员放行
-  if (isAdmin) return null;
-
   const idMatch = String(search || '').match(/id=eq\.([^&]+)/);
   if (!idMatch) throw new Error('缺少记录 ID');
 
   // 评论/点赞交互（P0-02/P1-04）：服务端 read-modify-write，只允许本人增删，
-  // 校验通过后以库内数组为基准应用该增/删再发给 PostgREST（顺带修并发丢赞）
+  // 校验通过后以库内数组为基准应用该增/删再发给 PostgREST（顺带修并发丢赞）。
+  // 管理员也必须走此通道：管理员客户端陈旧读同样会覆盖他人点赞（实测丢赞）。
   if (method === 'PATCH' && (table === 'feeds' || table === 'messages')) {
     let payload = {};
     try { payload = JSON.parse(bodyText || '{}'); } catch (e) { throw new Error('请求体无效'); }
@@ -200,6 +198,9 @@ async function enforceWritePolicy(config, session, method, table, search, bodyTe
       return await sanitizeInteractionPatch(config, session, table, idMatch[1], payload);
     }
   }
+
+  // PATCH / DELETE：其余写操作管理员放行（删他人内容等管理操作）
+  if (isAdmin) return null;
 
   // 其余 PATCH/DELETE：归属表仅本人
   const qUrl = `${config.supabaseUrl}/rest/v1/${table}?select=author&id=eq.${encodeURIComponent(decodeURIComponent(idMatch[1]))}&limit=1`;
