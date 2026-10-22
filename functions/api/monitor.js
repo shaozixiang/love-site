@@ -178,10 +178,20 @@ async function buildGithub(cfg) {
           message: (c.commit && c.commit.message || '').split('\n')[0].slice(0, 80),
           date: c.commit && (c.commit.author && c.commit.author.date) || null
         }));
-        const link = commitsRes.headers.get('link') || '';
-        const lm = link.match(/[?&]page=(\d+)>; rel="last"/);
-        commitCount = lm ? parseInt(lm[1], 10) : recentCommits.length;
+        // 准确提交数改由 per_page=1 请求获取（见下方）
+        
+        commitCount = recentCommits.length || null;
       }
+        // 准确提交数：per_page=1 时 Link 头最后一页页码即总数
+        try {
+          const countRes = await gh(`/repos/${cfg.owner}/${cfg.mainRepo}/commits?per_page=1`);
+          if (countRes.ok) {
+            const lk = countRes.headers.get('link') || '';
+            const lpm = lk.match(/[?&]page=(\d+)>; rel="last"/);
+            commitCount = lpm ? parseInt(lpm[1], 10) : (recentCommits.length || 1);
+          }
+        } catch (e) {}
+
       const runsRes = await gh(`/repos/${cfg.owner}/${cfg.mainRepo}/actions/runs?per_page=5`);
       let actionsRuns = [];
       if (runsRes.ok) {
@@ -352,7 +362,7 @@ async function buildSecurity(cfg) {
 // GitHub / HTTP 辅助（会话与鉴权统一走 ../_lib/session.js）
 // ============================================================
 async function githubFetch(cfg, path, opts = {}) {
-  return fetchWithTimeout(`https://api.github.com/repos/${cfg.owner}${path}`, {
+  return fetchWithTimeout(`https://api.github.com${path}`, {
     method: opts.method || 'GET',
     headers: {
       Authorization: `Bearer ${cfg.ghToken}`, Accept: 'application/vnd.github+json',
@@ -382,9 +392,9 @@ function getConfig(env) {
   if (!serviceKey) return { ok: false, error: 'SUPABASE_SERVICE_ROLE_KEY is not configured.' };
   return {
     ok: true, supabaseUrl, serviceKey, sessionSecret,
-    ghToken: env.GITHUB_TOKEN || '',
-    owner: env.GITHUB_OWNER || 'shaozixiang',
-    imgRepo: env.GITHUB_REPO || 'couple-images',
+    ghToken: env.GITHUB_TOKEN || env.GITHUB_IMG_TOKEN || '',
+    owner: env.GITHUB_OWNER || env.GITHUB_IMG_OWNER || 'shaozixiang',
+    imgRepo: env.GITHUB_REPO || env.GITHUB_IMG_REPO || 'couple-images',
     branch: env.GITHUB_BRANCH || 'main',
     mainRepo: env.GITHUB_MAIN_REPO || 'love-site',
     sbAccessToken: env.SUPABASE_ACCESS_TOKEN || '',
