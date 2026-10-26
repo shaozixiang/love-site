@@ -836,3 +836,72 @@ img, video { max-width: 100%; display: block; }
 /* 管理后台全屏覆盖：内层壳负责纵向滚动（v2 缺这条导致内容超出无法滚动） */
 #adminPanel.lui-overlay { overflow: hidden; }
 #adminPanel .lui-shell-admin { overflow-y: auto; max-height: 100dvh; min-height: 100%; -webkit-overflow-scrolling: touch; }
+
+/* ============================================================================
+   登录页背景播放器（login-bg）v20261027b
+   ============================================================================ */
+.login-bg-player { position: absolute; inset: 0; overflow: hidden; z-index: 0; border-radius: inherit; pointer-events: none; }
+#loginPage > .login-bg-player ~ .login-inner,
+#loginPage > .login-bg-player ~ .lui-shell { position: relative; z-index: 1; }
+#loginBgPlayer .lbg-layer {
+    position: absolute; inset: 0; background-size: cover; background-position: center;
+    opacity: 0; transition: opacity 1.2s ease; will-change: opacity;
+}
+#loginBgPlayer .lbg-layer.active { opacity: 1; }
+#loginBgPlayer .lbg-photo.dynamic { animation: lbgKenBurns 18s ease-in-out infinite alternate; }
+#loginBgPlayer video.lbg-video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; opacity: 0; transition: opacity 1s ease; }
+#loginBgPlayer video.lbg-video.active { opacity: 1; }
+#loginBgPlayer .lbg-overlay { position: absolute; inset: 0; pointer-events: none; }
+@keyframes lbgKenBurns {
+    0%   { transform: scale(1) translate(0, 0); }
+    100% { transform: scale(1.1) translate(1.5%, -1.5%); }
+}
+
+/* 模板 t1：全屏沉浸 + 底部/中心渐变蒙版（默认） */
+#loginPage.lbg-t1 .lbg-overlay { background: linear-gradient(180deg, rgba(20,10,16,0.10) 0%, rgba(20,10,16,0.30) 55%, rgba(20,10,16,0.62) 100%); }
+#loginPage.lbg-t1 .login-inner, #loginPage.lbg-t1 > .lui-shell { filter: none; }
+#loginPage.lbg-t1 .lui-card.hero, #loginPage.lbg-t1 .lui-card.login-box { background: rgba(255,255,255,0.88); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); box-shadow: var(--sh-md); }
+
+/* 模板 t2：毛玻璃沉浸（背景全铺 + 全卡片磨砂） */
+#loginPage.lbg-t2 .lbg-overlay { background: linear-gradient(160deg, rgba(20,10,16,0.18) 0%, rgba(20,10,16,0.42) 100%); }
+#loginPage.lbg-t2 .lui-card.hero, #loginPage.lbg-t2 .lui-card.login-box { background: rgba(255,255,255,0.72); backdrop-filter: blur(18px) saturate(1.2); -webkit-backdrop-filter: blur(18px) saturate(1.2); box-shadow: var(--sh-lg); }
+
+/* 模板 t3：景深（背景高斯模糊 + 清晰小卡） */
+#loginPage.lbg-t3 .lbg-layer, #loginPage.lbg-t3 video.lbg-video { filter: blur(22px) brightness(0.85); transform: scale(1.12); }
+#loginPage.lbg-t3 .lbg-overlay { background: rgba(20,10,16,0.16); }
+#loginPage.lbg-t3 .lui-card.hero, #loginPage.lbg-t3 .lui-card.login-box { background: rgba(255,255,255,0.96); box-shadow: var(--sh-md); }
+
+/* 模板 t4：极简（浅蒙版 + 卡片轻透） */
+#loginPage.lbg-t4 .lbg-overlay { background: linear-gradient(180deg, rgba(246,244,243,0.30) 0%, rgba(246,244,243,0.10) 45%, rgba(20,10,16,0.34) 100%); }
+#loginPage.lbg-t4 .lui-card.hero, #loginPage.lbg-t4 .lui-card.login-box { background: rgba(255,255,255,0.85); box-shadow: var(--sh-sm); }
+
+/* 音乐/视频声音提示角标（首次交互后才会出声） */
+.lbg-sound-hint { position: absolute; right: 14px; bottom: 12px; z-index: 2; font-size: 11px; color: rgba(255,255,255,0.85); background: rgba(20,10,16,0.4); padding: 4px 10px; border-radius: 999px; backdrop-filter: blur(6px); pointer-events: none; letter-spacing: 0.04em; }
+
+/* ---------- 登录页背景编辑器 ---------- */
+.lbg-tpl-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; }
+.lbg-tpl { border: 1.5px solid var(--line); border-radius: var(--r-sm); padding: 12px 10px; cursor: pointer; text-align: center; transition: all var(--t-fast) var(--ease); background: var(--elev); }
+.lbg-tpl.active { border-color: var(--rose); background: var(--rose-tint); box-shadow: var(--sh-rose-sm); }
+.lbg-tpl .t-name { font-weight: 600; font-size: 13px; color: var(--ink); }
+.lbg-tpl .t-desc { font-size: 11px; color: var(--ink-3); margin-top: 3px; line-height: 1.5; }
+.lbg-tpl .t-prev { height: 46px; border-radius: 8px; margin-bottom: 8px; background-size: cover; background-position: center; position: relative; overflow: hidden; border: 1px solid var(--line); }
+.lbg-tpl .t-prev::after { content: ""; position: absolute; inset: 0; background: linear-gradient(180deg, rgba(20,10,16,0.12), rgba(20,10,16,0.5)); }
+
+.lbg-media-row { display: flex; align-items: center; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--line); }
+.lbg-media-row:last-child { border-bottom: none; }
+.lbg-thumb { width: 52px; height: 52px; border-radius: var(--r-xs); object-fit: cover; background: var(--soft); flex: none; overflow: hidden; display: flex; align-items: center; justify-content: center; color: var(--ink-3); }
+.lbg-thumb img, .lbg-thumb video { width: 100%; height: 100%; object-fit: cover; }
+.lbg-media-main { flex: 1; min-width: 0; }
+.lbg-actions { display: flex; align-items: center; gap: 4px; flex: none; }
+
+/* 预览浮层 */
+.lbg-preview { position: fixed; inset: 0; z-index: 2000; background: #000; overflow: hidden; }
+.lbg-preview .lbg-close { position: absolute; top: 14px; right: 14px; z-index: 3; width: 40px; height: 40px; border-radius: 50%; background: rgba(255,255,255,0.18); color: #fff; border: none; font-size: 20px; cursor: pointer; display: flex; align-items: center; justify-content: center; backdrop-filter: blur(6px); }
+.lbg-preview .lbg-preview-title { position: absolute; top: 16px; left: 50%; transform: translateX(-50%); z-index: 3; color: rgba(255,255,255,0.9); font-size: 13px; letter-spacing: 0.06em; background: rgba(20,10,16,0.45); padding: 6px 16px; border-radius: 999px; backdrop-filter: blur(6px); }
+
+/* 预览浮层模板效果（与登录页同一套） */
+.lbg-preview.lbg-t1 .lbg-overlay { background: linear-gradient(180deg, rgba(20,10,16,0.10) 0%, rgba(20,10,16,0.30) 55%, rgba(20,10,16,0.62) 100%); }
+.lbg-preview.lbg-t2 .lbg-overlay { background: linear-gradient(160deg, rgba(20,10,16,0.18) 0%, rgba(20,10,16,0.42) 100%); }
+.lbg-preview.lbg-t3 .lbg-layer, .lbg-preview.lbg-t3 video.lbg-video { filter: blur(22px) brightness(0.85); transform: scale(1.12); }
+.lbg-preview.lbg-t3 .lbg-overlay { background: rgba(20,10,16,0.16); }
+.lbg-preview.lbg-t4 .lbg-overlay { background: linear-gradient(180deg, rgba(246,244,243,0.30) 0%, rgba(246,244,243,0.10) 45%, rgba(20,10,16,0.34) 100%); }

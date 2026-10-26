@@ -4,12 +4,13 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
     <title>我们的专属小站</title>
-    <meta name="version" content="20261027b">
-    <link rel="stylesheet" href="assets/love-ui.css?v=20261027b">
+    <meta name="version" content="20261027c">
+    <link rel="stylesheet" href="assets/love-ui.css?v=20261027c">
     <link rel="stylesheet" href="/lib/leaflet.css?v=20261011a">
     <script defer src="/lib/leaflet.js?v=20261011a"></script>
     <script defer src="/lib/supabase-v2.js?v=20261011a"></script>
-    <script defer src="/lib/app-v2.js?v=20261027b"></script>
+    <script defer src="/lib/app-v2.js?v=20261027c"></script>
+    <script defer src="/lib/login-bg.js?v=20261027c"></script>
 
     <style>
 /* ============================================================
@@ -202,6 +203,8 @@
 
     <!-- 登录页 -->
     <div class="login-container" id="loginPage" style="display:none;">
+        <div id="loginBgPlayer" class="login-bg-player" style="display:none;"></div>
+        <audio id="loginBgAudio" loop preload="auto" style="display:none;"></audio>
         <div class="login-inner">
             <div class="lui-card hero login-hero-card">
                 <div class="hero-heart"><svg class="lui-icon s32"><use href="assets/icons.svg#i-heart"/></svg></div>
@@ -245,6 +248,7 @@
                         <button class="dm-item" onclick="openEmailModal()"><svg class="lui-icon"><use href="assets/icons.svg#i-mail"/></svg>我的邮箱</button>
                         <button class="dm-item" onclick="openUsernameModal()"><svg class="lui-icon"><use href="assets/icons.svg#i-pencil"/></svg>修改用户名</button>
                         <button class="dm-item" onclick="openPasswordModal()"><svg class="lui-icon"><use href="assets/icons.svg#i-lock"/></svg>修改密码</button>
+                        <button class="dm-item" id="loginBgEntryBtn" style="display:none;" onclick="openLoginBgEntry()"><svg class="lui-icon"><use href="assets/icons.svg#i-film"/></svg>登录页背景</button>
                         <button class="dm-item" id="adminEntryBtn" style="display:none;" onclick="openAdminPanel()"><svg class="lui-icon"><use href="assets/icons.svg#i-gauge"/></svg>管理后台</button>
                         <button class="dm-item danger" onclick="logout()"><svg class="lui-icon"><use href="assets/icons.svg#i-log-out"/></svg>退出登录</button>
                     </div>
@@ -575,5 +579,8 @@
 
     <!-- Toast 轻提示 -->
     <div id="toastBox"></div>
+
+    <!-- 登录页背景：预览浮层 -->
+    <div id="loginBgPreview" class="lbg-preview" style="display:none;"></div>
 </body>
 </html>

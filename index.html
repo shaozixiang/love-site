@@ -3,13 +3,14 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <meta name="version" content="20261027b">
+    <meta name="version" content="20261027c">
     <title>我们的专属小站</title>
-    <link rel="stylesheet" href="assets/love-ui.css?v=20261027b">
+    <link rel="stylesheet" href="assets/love-ui.css?v=20261027c">
     <link rel="stylesheet" href="/lib/leaflet.css?v=20261011a">
     <script defer src="/lib/leaflet.js?v=20261011a"></script>
     <script defer src="/lib/supabase.min.js?v=20261011a"></script>
-    <script defer src="/lib/app.js?v=20261027b"></script>
+    <script defer src="/lib/app.js?v=20261027c"></script>
+    <script defer src="/lib/login-bg.js?v=20261027c"></script>
     <style>
     /* ===== 页面专属样式：只允许使用 love-ui.css 的 token，禁止硬编码颜色 ===== */
     body { overflow-x: hidden; }
@@ -197,6 +198,8 @@
 
     <!-- ============ 登录页 ============ -->
     <div id="loginPage">
+        <div id="loginBgPlayer" class="login-bg-player" style="display:none;"></div>
+        <audio id="loginBgAudio" loop preload="auto" style="display:none;"></audio>
         <div class="lui-shell" style="display:flex;flex-direction:column;gap:16px;width:100%;max-width:400px;">
             <div class="lui-card hero" style="padding:26px 22px;text-align:center;">
                 <div style="display:inline-flex;background:rgba(255,255,255,.2);border:1px solid rgba(255,255,255,.35);border-radius:50%;width:56px;height:56px;align-items:center;justify-content:center;margin-bottom:12px;">
@@ -238,6 +241,7 @@
                 <div class="dropdown-menu" id="dropdownMenu">
                     <button onclick="openUsernameModal()"><svg class="lui-icon s16"><use href="assets/icons.svg#i-pencil"/></svg>修改用户名</button>
                     <button onclick="openPasswordModal()"><svg class="lui-icon s16"><use href="assets/icons.svg#i-lock"/></svg>修改密码</button>
+                    <button onclick="openLoginBgEntry()" id="loginBgEntryBtn" style="display:none;"><svg class="lui-icon s16"><use href="assets/icons.svg#i-film"/></svg>登录页背景</button>
                     <button onclick="openAdminPanel()" id="adminEntryBtn" style="display:none;"><svg class="lui-icon s16"><use href="assets/icons.svg#i-shield-check"/></svg>管理后台</button>
                     <button class="danger" onclick="logout()"><svg class="lui-icon s16"><use href="assets/icons.svg#i-log-out"/></svg>退出登录</button>
                 </div>
@@ -504,5 +508,8 @@
 
     <!-- Toast 容器 -->
     <div id="toastBox"></div>
+
+    <!-- 登录页背景：预览浮层 -->
+    <div id="loginBgPreview" class="lbg-preview" style="display:none;"></div>
 </body>
 </html>

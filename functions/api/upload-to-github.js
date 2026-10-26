@@ -12,9 +12,10 @@ import {
 
 const MAX_IMAGE_BYTES = 10 * 1024 * 1024;   // 图片 10MB
 const MAX_VIDEO_BYTES = 30 * 1024 * 1024;   // 视频 30MB
-const ALLOWED_FOLDERS = new Set(['common', 'feeds', 'messages', 'bubbles', 'avatars']);
+const MAX_AUDIO_BYTES = 20 * 1024 * 1024;   // 音频 20MB
+const ALLOWED_FOLDERS = new Set(['common', 'feeds', 'messages', 'bubbles', 'avatars', 'loginbg']);
 
-// 媒体类型白名单（S3：只收图片/视频，杜绝 html/svg/js 等可执行/可脚本类型）
+// 媒体类型白名单（S3：只收图片/视频/音频，杜绝 html/svg/js 等可执行/可脚本类型）
 const MIME_TO_EXT = {
   'image/jpeg': 'jpg', 'image/jpg': 'jpg', 'image/pjpeg': 'jpg',
   'image/png': 'png', 'image/x-png': 'png',
@@ -23,16 +24,20 @@ const MIME_TO_EXT = {
   'image/bmp': 'bmp', 'image/x-ms-bmp': 'bmp',
   'video/mp4': 'mp4', 'video/webm': 'webm', 'video/quicktime': 'mov',
   'video/3gpp': '3gp', 'video/3gpp2': '3g2', 'video/m4v': 'm4v', 'video/x-m4v': 'm4v',
-  'video/x-msvideo': 'avi', 'video/mpeg': 'mpeg'
+  'video/x-msvideo': 'avi', 'video/mpeg': 'mpeg',
+  'audio/mpeg': 'mp3', 'audio/mp3': 'mp3', 'audio/mp4': 'm4a', 'audio/x-m4a': 'm4a',
+  'audio/aac': 'aac', 'audio/wav': 'wav', 'audio/x-wav': 'wav', 'audio/ogg': 'ogg', 'audio/webm': 'weba'
 };
 const ALLOWED_EXT = new Set(['jpg', 'jpeg', 'png', 'gif', 'webp', 'avif', 'heic', 'heif', 'bmp',
-  'mp4', 'mov', 'webm', '3gp', '3g2', 'm4v', 'avi', 'mpeg']);
+  'mp4', 'mov', 'webm', '3gp', '3g2', 'm4v', 'avi', 'mpeg',
+  'mp3', 'm4a', 'aac', 'wav', 'ogg', 'weba']);
 
-// 判断是否为安全的媒体类型：图片（svg 除外）、视频、或未知二进制（按扩展名判）
+// 判断是否为安全的媒体类型：图片（svg 除外）、视频、音频、或未知二进制（按扩展名判）
 function isMediaMime(mime) {
   if (!mime) return 'unknown';
   if (mime.indexOf('image/') === 0) return mime === 'image/svg+xml' ? false : 'image';
   if (mime.indexOf('video/') === 0) return 'video';
+  if (mime.indexOf('audio/') === 0) return 'audio';
   if (mime === 'application/octet-stream') return 'unknown';
   return false;
 }
@@ -60,7 +65,8 @@ export async function onRequest(context) {
     sessionSecret: env.AUTH_SESSION_SECRET || env.SUPABASE_SERVICE_ROLE_KEY || env.SUPABASE_SERVICE_KEY
   };
   const token = readCookie(request.headers.get('Cookie') || '', 'couple_t') || request.headers.get('X-Couple-Token') || '';
-  try { await requireSession(sessionConfig, token); }
+  let session;
+  try { session = await requireSession(sessionConfig, token); }
   catch (e) { return jsonResponse({ error: '请先登录后再上传。' }, 401, headers); }
 
   const ghToken = env.GITHUB_TOKEN;
@@ -80,25 +86,50 @@ export async function onRequest(context) {
       return jsonResponse({ error: 'No media file received.' }, 400, headers);
     }
 
-    // 文件类型白名单：只收图片/视频；SVG 可内嵌脚本、html/js 等一律拒绝
+    // 文件类型白名单：只收图片/视频/音频；SVG 可内嵌脚本、html/js 等一律拒绝
     const mime = String(file.type || '').toLowerCase();
     const kind = isMediaMime(mime);
     if (kind === false) {
-      return jsonResponse({ error: '不支持这个文件格式：请上传 jpg/png/gif/webp/heic/avif 照片，或 mp4/mov/webm/3gp 视频。' }, 400, headers);
+      return jsonResponse({ error: '不支持这个文件格式：请上传 jpg/png/gif/webp/heic/avif 照片，mp4/mov/webm/3gp 视频，或 mp3/m4a/wav/ogg 音乐。' }, 400, headers);
     }
     const extension = getExtension(file.name, mime, kind);
     if (!extension) {
-      return jsonResponse({ error: '无法识别这个文件的类型：请上传 jpg/png/gif/webp/heic/avif 照片，或 mp4/mov/webm/3gp 视频。' }, 400, headers);
+      return jsonResponse({ error: '无法识别这个文件的类型：请上传 jpg/png/gif/webp/heic/avif 照片，mp4/mov/webm/3gp 视频，或 mp3/m4a/wav/ogg 音乐。' }, 400, headers);
     }
 
-    // 大小上限：图片 10MB / 视频 30MB（Git Data blob 支持 base64 ≤100MB）
-    const maxBytes = kind === 'image' ? MAX_IMAGE_BYTES : (kind === 'video' ? MAX_VIDEO_BYTES : MAX_IMAGE_BYTES);
+    // 大小上限：图片 10MB / 视频 30MB / 音频 20MB（Git Data blob 支持 base64 ≤100MB）
+    const maxBytes = kind === 'image' ? MAX_IMAGE_BYTES : (kind === 'video' ? MAX_VIDEO_BYTES : (kind === 'audio' ? MAX_AUDIO_BYTES : MAX_IMAGE_BYTES));
     if (file.size > maxBytes) {
       const limitMb = Math.round(maxBytes / 1024 / 1024);
-      return jsonResponse({ error: `文件过大：${kind === 'video' ? '视频' : '图片'}请控制在 ${limitMb}MB 以内。` }, 413, headers);
+      return jsonResponse({ error: `文件过大：${kind === 'video' ? '视频' : (kind === 'audio' ? '音乐' : '图片')}请控制在 ${limitMb}MB 以内。` }, 413, headers);
     }
 
     const folder = sanitizeFolder(formData.get('folder') || 'common');
+
+    // 登录页背景文件夹：仅管理员或被授权用户可传（服务端强制，防止越权塞内容）
+    if (folder === 'loginbg') {
+      let allowed = session && (session.username === 'admin');
+      try {
+        const adminResp = await fetch(`${sessionConfig.supabaseUrl}/rest/v1/users?select=role&username=eq.${encodeURIComponent(session.username)}&limit=1`, {
+          headers: { apikey: sessionConfig.serviceKey, Authorization: `Bearer ${sessionConfig.serviceKey}` }
+        });
+        const rows = await adminResp.json().catch(() => null);
+        if (Array.isArray(rows) && rows.length && rows[0].role === 'admin') allowed = true;
+      } catch (e) {}
+      if (!allowed) {
+        try {
+          const cfgResp = await fetch(`${sessionConfig.supabaseUrl}/rest/v1/login_bg_config?select=authorized_users&limit=1`, {
+            headers: { apikey: sessionConfig.serviceKey, Authorization: `Bearer ${sessionConfig.serviceKey}` }
+          });
+          const cfgRows = await cfgResp.json().catch(() => null);
+          const authUsers = Array.isArray(cfgRows) && cfgRows[0] && Array.isArray(cfgRows[0].authorized_users) ? cfgRows[0].authorized_users : [];
+          if (authUsers.indexOf(session.username) !== -1) allowed = true;
+        } catch (e) {}
+      }
+      if (!allowed) {
+        return jsonResponse({ error: '无权限：登录页背景媒体仅管理员或被授权用户可上传。' }, 403, headers);
+      }
+    }
     const datedFolder = new Date().toISOString().slice(0, 7);
     const objectName = `${Date.now()}-${randomHex(4)}.${extension}`;
     const githubPath = `${folder}/${datedFolder}/${objectName}`;
@@ -203,6 +234,7 @@ function getExtension(filename, contentType, kind) {
   const nameExt = extFromFilename(filename);
   if (kind === 'image') return nameExt || 'jpg'; // 其他图片格式兜底为 jpg
   if (kind === 'video') return nameExt || 'mp4'; // 其他视频格式兜底为 mp4
+  if (kind === 'audio') return nameExt || 'mp3'; // 其他音频格式兜底为 mp3
   // 类型未知（浏览器未报 type 或 octet-stream）：只能依赖文件名扩展名白名单
   return nameExt;
 }
