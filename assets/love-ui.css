@@ -525,6 +525,9 @@ img, video { max-width: 100%; display: block; }
 /* 管理控制台全屏覆盖主页面（高于底栏 850），但低于普通弹窗 950，
    保证面板内打开的确认/注册/改密等弹窗能正确浮在其上方，不再被遮挡 */
 #adminPanel.lui-overlay { z-index: 940; }
+/* 注册弹窗必须高于登录页（#loginPage z-index 999），否则点击注册时弹窗被登录页盖住
+   只有登录成功登录页隐藏后弹窗才露出——表现为"登录成功瞬间弹注册框" */
+#registerModal.lui-overlay { z-index: 1001; }
 .lui-sheet {
     width: 100%; max-width: 480px;
     max-height: 88dvh; overflow-y: auto;
