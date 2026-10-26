@@ -522,6 +522,9 @@ img, video { max-width: 100%; display: block; }
 }
 .lui-overlay.show { display: flex; animation: lui-fade var(--t) var(--ease); }
 .lui-overlay.center { align-items: center; padding: 20px; }
+/* 管理控制台全屏覆盖主页面（高于底栏 850），但低于普通弹窗 950，
+   保证面板内打开的确认/注册/改密等弹窗能正确浮在其上方，不再被遮挡 */
+#adminPanel.lui-overlay { z-index: 940; }
 .lui-sheet {
     width: 100%; max-width: 480px;
     max-height: 88dvh; overflow-y: auto;
