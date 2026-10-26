@@ -179,6 +179,8 @@ async function handleAction(config, body, request) {
     catch (e) { await recordAuthFailure(config, key, REG_WINDOW_MS, REG_LOCK_MS, REG_MAX_FAIL); throw e; }
   }
   if (action === 'track') return trackEvents(config, body, request);
+  // 登录页公开查询注册配置（无需登录）。只返回是否开放注册/通道是否开启，绝不泄露邀请码本身
+  if (action === 'getRegisterOpen') return getRegisterOpen(config);
 
   const session = await requireSession(config, body.sessionToken);
   if (action === 'me') return { user: await getPublicUser(config, session.username) };
@@ -304,6 +306,15 @@ async function getSignupCode(config) {
     code: m.signup_code || '',
     register_open: m.register_open === '1' || m.register_open === 'true' || m.register_open === true
   };
+}
+
+// 登录页公开查询（无需登录）：只暴露"是否需要邀请码"，不返回邀请码内容
+async function getRegisterOpen(config) {
+  let m = {};
+  try { m = await getSiteValues(config); } catch (e) { return { open: false, channel: false }; }
+  const open = m.register_open === '1' || m.register_open === 'true' || m.register_open === true;
+  const channel = open || !!String(m.signup_code || '').trim();
+  return { open, channel };
 }
 
 async function setRegisterOpen(config, body) {
