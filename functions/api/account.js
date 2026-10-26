@@ -57,7 +57,7 @@ async function recordAuthFailure(config, key, windowMs, lockMs, maxFail) {
 }
 
 async function clearAuthRate(config, key) { await clearRateState(config, key); }
-const USER_COLUMNS = 'username,password,password_hash,password_salt,avatar,permission,role,last_active,is_online';
+const USER_COLUMNS = 'username,password_hash,password_salt,avatar,permission,role,last_active,is_online';
 const PUBLIC_USER_COLUMNS = 'username,avatar,permission,role,last_active,is_online';
 
 export async function onRequest(context) {
@@ -314,22 +314,24 @@ async function setRegisterOpen(config, body) {
 
 async function getBubbleConfig(config) {
   try {
-    const rows = await supabase(config, '/bubble_config?select=id,enabled,interval&limit=1', { method: 'GET' });
+    const rows = await supabase(config, '/bubble_config?select=id,enabled,interval,photo_scope&limit=1', { method: 'GET' });
     const row = (rows && rows[0]) || null;
-    return { enabled: row ? row.enabled !== false : true, interval: (row && row.interval) || 12 };
-  } catch (e) { return { enabled: true, interval: 12 }; }
+    return { enabled: row ? row.enabled !== false : true, interval: (row && row.interval) || 12, photo_scope: (row && row.photo_scope) || 'all' };
+  } catch (e) { return { enabled: true, interval: 12, photo_scope: 'all' }; }
 }
 
 async function setBubbleConfig(config, body) {
   const enabled = body.enabled !== false;
   const interval = Math.max(3, Math.min(120, parseInt(body.interval, 10) || 12));
+  // photo_scope：气泡照片来源范围（隐私控制），白名单校验
+  const scope = ['all', 'feeds', 'messages', 'none'].includes(body.photo_scope) ? body.photo_scope : 'all';
   const rows = await supabase(config, '/bubble_config?select=id&limit=1', { method: 'GET' });
   if (rows && rows[0] && rows[0].id) {
-    await supabase(config, `/bubble_config?id=eq.${encodeURIComponent(rows[0].id)}`, { method: 'PATCH', body: { enabled, interval }, prefer: 'return=representation' });
+    await supabase(config, `/bubble_config?id=eq.${encodeURIComponent(rows[0].id)}`, { method: 'PATCH', body: { enabled, interval, photo_scope: scope }, prefer: 'return=representation' });
   } else {
-    await supabase(config, '/bubble_config', { method: 'POST', body: { enabled, interval }, prefer: 'return=representation' });
+    await supabase(config, '/bubble_config', { method: 'POST', body: { enabled, interval, photo_scope: scope }, prefer: 'return=representation' });
   }
-  return { ok: true, enabled, interval };
+  return { ok: true, enabled, interval, photo_scope: scope };
 }
 
 async function deleteUser(config, usernameInput) {
@@ -693,8 +695,8 @@ async function verifyPassword(config, password, user) {
     }
     return false;
   }
-  // 极早期明文兜底（兼容老数据）
-  return String(user.password || '') === password;
+  // users.password 明文列已删除（收尾 SQL），此处兜底分支随之移除
+  return false;
 }
 
 async function hashPasswordWithIter(password, salt, iterations) {
