@@ -293,7 +293,11 @@ async function buildSupabase(cfg) {
       }, 6000);
       if (r.ok) {
         const orgs = await r.json();
-        if (Array.isArray(orgs) && orgs.length) out.management.plan = orgs[0].plan || null;
+        out.management.orgCount = Array.isArray(orgs) ? orgs.length : 0;
+        if (Array.isArray(orgs) && orgs.length) {
+          out.management.plan = orgs[0].plan || null;
+          out.management.orgName = orgs[0].name || null;
+        }
         out.management.orgStatus = 'ok';
       } else {
         out.management.orgStatus = String(r.status);
