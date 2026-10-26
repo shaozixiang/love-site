@@ -286,7 +286,7 @@ async function buildSupabase(cfg) {
         out.management.error = `Management API 返回 ${r.status}（token 权限或项目 ref 有误）`;
       }
     } catch (e) { out.management.error = 'Management API 不可用：' + String(e.message || e); }
-    // 组织套餐（Full access token 可读；只读 token 可能 403，容错为 null）
+    // 组织套餐（Full access token 可读；只读 token 可能 403，容错为 null 并记录原因）
     try {
       const r = await fetchWithTimeout('https://api.supabase.com/v1/organizations', {
         headers: { Authorization: `Bearer ${cfg.sbAccessToken}` }
@@ -294,8 +294,11 @@ async function buildSupabase(cfg) {
       if (r.ok) {
         const orgs = await r.json();
         if (Array.isArray(orgs) && orgs.length) out.management.plan = orgs[0].plan || null;
+        out.management.orgStatus = 'ok';
+      } else {
+        out.management.orgStatus = String(r.status);
       }
-    } catch (e) { /* 保持 null */ }
+    } catch (e) { out.management.orgStatus = 'network-error'; }
   }
   return out;
 }
