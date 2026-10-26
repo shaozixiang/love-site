@@ -264,12 +264,38 @@ async function buildSupabase(cfg) {
     }
   } catch (e) { /* RPC 不可用保持空数组 */ }
 
-  // Management API（可选 env）
+  // Management API（可选 env；token 权限越高能读到的越多）
   if (cfg.sbAccessToken && cfg.sbProjectRef) {
     out.management.configured = true;
-    out.management.setupSteps = '已配置 SUPABASE_ACCESS_TOKEN / SUPABASE_PROJECT_REF；用量明细请到 Dashboard → Project Usage 查看';
-    // 真实 egress 数据需 Management API 用量接口；未取到保持 null，不编造
-    out.egress = null;
+    out.management.setupSteps = '已配置 SUPABASE_ACCESS_TOKEN / SUPABASE_PROJECT_REF';
+    // 项目元信息（名称/地域/状态/创建时间/数据库主机）
+    try {
+      const r = await fetchWithTimeout(`https://api.supabase.com/v1/projects/${encodeURIComponent(cfg.sbProjectRef)}`, {
+        headers: { Authorization: `Bearer ${cfg.sbAccessToken}` }
+      }, 6000);
+      if (r.ok) {
+        const p = await r.json();
+        out.management.project = {
+          name: p.name || null,
+          region: p.region || null,
+          status: p.status || null,
+          createdAt: p.created_at || null,
+          dbHost: (p.database && p.database.host) || null
+        };
+      } else {
+        out.management.error = `Management API 返回 ${r.status}（token 权限或项目 ref 有误）`;
+      }
+    } catch (e) { out.management.error = 'Management API 不可用：' + String(e.message || e); }
+    // 组织套餐（Full access token 可读；只读 token 可能 403，容错为 null）
+    try {
+      const r = await fetchWithTimeout('https://api.supabase.com/v1/organizations', {
+        headers: { Authorization: `Bearer ${cfg.sbAccessToken}` }
+      }, 6000);
+      if (r.ok) {
+        const orgs = await r.json();
+        if (Array.isArray(orgs) && orgs.length) out.management.plan = orgs[0].plan || null;
+      }
+    } catch (e) { /* 保持 null */ }
   }
   return out;
 }
