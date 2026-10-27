@@ -185,8 +185,8 @@ export async function onRequest(context) {
       const order_mode = VALID_ORDERS.has(body.order_mode) ? body.order_mode : 'sequence';
       const template = VALID_TEMPLATES.has(body.template) ? body.template : 't1';
       let music_url = body.music_url ? String(body.music_url).trim() : null;
-      // 允许站内代理路径（/api/music/play?id=... 网易云 / /api/music?action=resolve&rid=... 酷我完整版）或 https 直链
-      if (music_url && !/^(https:\/\/|\/api\/music\/(play\?id=\d+|resolve\?rid=MUSIC_\d+))/.test(music_url)) music_url = null;
+      // 允许站内代理路径（/api/music?action=resolve&rid=... 酷我完整版 / /api/music/play?id=... 网易云）或 https 直链
+      if (music_url && !/^(https:\/\/|\/api\/music(\?action=(resolve&rid=MUSIC_\d+|play&id=\d+)|play\?id=\d+))/.test(music_url)) music_url = null;
       let music_name = body.music_name ? String(body.music_name).trim().slice(0, 120) : null;
       let photo_duration = Number(body.photo_duration);
       if (!Number.isFinite(photo_duration)) photo_duration = 6;

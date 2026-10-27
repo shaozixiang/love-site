@@ -5,7 +5,7 @@
 // 登录态：search 需要有效会话（防滥用）；resolve/play 免登录（登录页未登录时也要播放）
 const NETEASE_SEARCH = 'https://music.163.com/api/search/get/web';
 const NETEASE_OUTER = 'https://music.163.com/song/media/outer/url';
-const KUWO_SEARCH = 'http://search.kuwo.cn/r.s';
+const KUWO_SEARCH = 'https://search.kuwo.cn/r.s';
 const KUWO_ANTI = 'http://antiserver.kuwo.cn/anti.s';
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36';
 
@@ -111,7 +111,7 @@ async function handle({ request, env }) {
 // 酷我搜索：返回 {id: rid, name, artist, duration(ms), url: resolve 代理}
 async function kuwoSearch(keyword) {
   const resp = await fetch(KUWO_SEARCH + '?all=' + encodeURIComponent(keyword) + '&ft=music&itemset=web_2013&client=kt&pn=0&rn=15&rformat=json&encoding=utf8', {
-    headers: { 'User-Agent': UA }
+    headers: { 'User-Agent': UA, 'Referer': 'https://www.kuwo.cn/' }
   });
   if (!resp.ok) throw new Error('kuwo ' + resp.status);
   const text = await resp.text();
