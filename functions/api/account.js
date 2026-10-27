@@ -249,7 +249,6 @@ async function createUser(config, body) {
   const passwordData = await buildPasswordFields(config, password);
   const row = await insertUser(config, {
     username,
-    password: null,
     ...passwordData,
     avatar: '',
     permission: 'full',
@@ -283,7 +282,6 @@ async function publicRegister(config, body) {
   const passwordData = await buildPasswordFields(config, password);
   const row = await insertUser(config, {
     username,
-    password: null,
     ...passwordData,
     avatar: '',
     permission: 'comment',  // 自助注册默认仅可评论/点赞，管理员可在后台提升为完全权限
@@ -666,7 +664,7 @@ async function patchUser(config, username, patch) {
 }
 
 async function updatePassword(config, username, password) {
-  await patchUser(config, username, { password: null, ...(await buildPasswordFields(config, password)), password_updated_at: new Date().toISOString() });
+  await patchUser(config, username, { ...(await buildPasswordFields(config, password)), password_updated_at: new Date().toISOString() });
 }
 
 async function buildPasswordFields(config, password) {
