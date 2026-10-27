@@ -78,6 +78,41 @@ async function handle({ request, env }) {
     }
   }
 
+  if (action === 'stream') {
+    // 酷我完整曲目"流式代理"：客户端 src 直指本代理 → worker 每次实时解析新鲜直链并转发 mp3 流。
+    // 目的：酷我 COS 直链带 Content-Disposition: attachment + 移动端会把音频当"下载"反复断流
+    // → 连累同页视频起播失败；代理重写为正常 inline 播放头，全端稳定。
+    if (!/^MUSIC_\d+$/.test(String(rid || ''))) return json({ error: '参数错误' }, 400);
+    try {
+      const antiResp = await fetch(KUWO_ANTI + '?format=mp3&rid=' + encodeURIComponent(rid) + '&type=convert_url&response=url', {
+        headers: { 'User-Agent': UA }
+      });
+      if (!antiResp.ok) return json({ error: '获取播放地址失败' }, 502);
+      const direct = (await antiResp.text()).trim();
+      if (!/^https?:\/\//.test(direct)) return json({ error: '该歌曲暂时无法播放' }, 404);
+      const rangeHeader = request.headers.get('range');
+      const upstream = await fetch(direct, {
+        redirect: 'follow',
+        headers: {
+          'User-Agent': UA,
+          'Referer': 'https://www.kuwo.cn/',
+          ...(rangeHeader ? { 'Range': rangeHeader } : {})
+        }
+      });
+      if (!upstream.ok && upstream.status !== 206) return json({ error: '音频源暂不可用' }, 502);
+      const headers = new Headers();
+      headers.set('Content-Type', 'audio/mpeg');
+      headers.set('Content-Disposition', 'inline'); // 关键：COS 原响应是 attachment，重写为 inline 才能正常播放
+      headers.set('Cache-Control', 'public, max-age=3600');
+      headers.set('Accept-Ranges', 'bytes');
+      if (upstream.status === 206 && upstream.headers.get('content-range')) headers.set('Content-Range', upstream.headers.get('content-range'));
+      if (upstream.headers.get('content-length')) headers.set('Content-Length', upstream.headers.get('content-length'));
+      return new Response(upstream.body, { status: upstream.status === 206 ? 206 : 200, headers: headers });
+    } catch (e) {
+      return json({ error: '播放服务暂时不可用，请稍后再试' }, 502);
+    }
+  }
+
   if (action === 'play') {
     if (!/^\d+$/.test(String(id || ''))) return json({ error: '参数错误' }, 400);
     try {
