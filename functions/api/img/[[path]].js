@@ -88,7 +88,11 @@ export async function onRequest(context) {
       Authorization: `Bearer ${pat}`,
       'User-Agent': 'couple-site-private-img'
     };
-    if (rangeHeader) upstreamHeaders['Range'] = rangeHeader;
+    // 视频首帧（无 Range 或 bytes=0-）不带 Range 回源整文件：回源一次 → 200 进边缘缓存 →
+    // 后续拖动请求走缓存切片（rangeFromCached），避免每个分段都回源导致播放卡顿。
+    // 中途拖动（非 0 起始 Range）才带 Range 回源，快速响应、不缓存。
+    const isInitialRange = !rangeHeader || /^bytes=0-$/.test(rangeHeader.trim());
+    if (rangeHeader && !isInitialRange) upstreamHeaders['Range'] = rangeHeader;
 
     const ghResp = await fetch(upstream, { headers: upstreamHeaders });
     if (!ghResp.ok && ghResp.status !== 206) {
