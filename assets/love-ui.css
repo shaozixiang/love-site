@@ -323,7 +323,7 @@ img, video { max-width: 100%; display: block; }
 
 /* ---------- 7. 表单 ---------- */
 .lui-field { display: flex; flex-direction: column; gap: 7px; margin-bottom: 14px; }
-.lui-field > label, .lui-label { font-size: var(--f-sub); font-weight: 600; color: var(--ink-2); }
+.lui-field > label, .lui-label { font-size: var(--f-sub); font-weight: 600; color: var(--ink-2); display: block; line-height: 1.5; margin-bottom: 6px; }
 .lui-input, .lui-textarea, .lui-select {
     width: 100%;
     background: var(--elev);
@@ -430,6 +430,9 @@ img, video { max-width: 100%; display: block; }
     position: relative;
     min-height: 48px;
 }
+/* 登录页背景编辑器内：统一行内边距，保证开关行与分段/下拉等行的文字左边缘对齐 */
+#loginBgEditorModal .lui-list-row, #adminContent .lui-list-row { padding-left: 0; padding-right: 0; }
+#loginBgEditorModal .lui-list-row + .lui-list-row::before, #adminContent .lui-list-row + .lui-list-row::before { left: 0; }
 .lui-list-row + .lui-list-row::before {
     content: ""; position: absolute; top: 0; left: 15px; right: 0;
     height: 1px; background: var(--line);
@@ -895,8 +898,8 @@ img, video { max-width: 100%; display: block; }
 .lbg-media-main { flex: 1; min-width: 0; }
 .lbg-actions { display: flex; align-items: center; gap: 4px; flex: none; }
 
-/* 预览浮层 */
-.lbg-preview { position: fixed; inset: 0; z-index: 2000; background: #000; overflow: hidden; }
+/* 预览浮层（z-index 高于设置弹层 2000，否则点预览被弹层遮挡） */
+.lbg-preview { position: fixed; inset: 0; z-index: 2500; background: #000; overflow: hidden; }
 .lbg-preview .lbg-close { position: absolute; top: 14px; right: 14px; z-index: 3; width: 40px; height: 40px; border-radius: 50%; background: rgba(255,255,255,0.18); color: #fff; border: none; font-size: 20px; cursor: pointer; display: flex; align-items: center; justify-content: center; backdrop-filter: blur(6px); }
 .lbg-preview .lbg-preview-title { position: absolute; top: 16px; left: 50%; transform: translateX(-50%); z-index: 3; color: rgba(255,255,255,0.9); font-size: 13px; letter-spacing: 0.06em; background: rgba(20,10,16,0.45); padding: 6px 16px; border-radius: 999px; backdrop-filter: blur(6px); }
 
