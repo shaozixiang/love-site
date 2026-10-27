@@ -131,13 +131,16 @@ export async function onRequest(context) {
 
   try {
     if (action === 'trace') {
-      // 环境取证：登录页加载时上报 UA/屏幕/入口，落 admin_logs 供排查三平台差异（不涉及敏感信息）
+      // 环境取证：登录页加载时上报 UA/屏幕/入口/事件，落 admin_logs 供排查三平台差异（不涉及敏感信息）
+      const td = (body && body.data) || {};
       await serverLog(config, '登录页背景-环境上报', 'guest', {
-        ua: String(body.data && body.data.ua || '').slice(0, 400),
-        platform: String(body.data && body.data.platform || '').slice(0, 100),
-        screen: String(body.data && body.data.screen || '').slice(0, 60),
-        href: String(body.data && body.data.href || '').slice(0, 200),
-        v: String(body.data && body.data.v || '').slice(0, 30)
+        ev: String(td.ev || '').slice(0, 40),
+        ua: String(td.ua || '').slice(0, 400),
+        platform: String(td.platform || '').slice(0, 100),
+        screen: String(td.screen || '').slice(0, 60),
+        href: String(td.href || '').slice(0, 200),
+        v: String(td.v || '').slice(0, 30),
+        extra: JSON.stringify(td).slice(0, 500)
       });
       return jsonResponse({ ok: true }, 200, headers);
     }
