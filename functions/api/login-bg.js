@@ -149,6 +149,8 @@ export async function onRequest(context) {
         music_url: row.music_url || null,
         music_name: row.music_name || null,
         photo_duration: row.photo_duration != null ? Number(row.photo_duration) : 6,
+        static_url: row.static_url || null,
+        loop_count: row.loop_count != null ? Number(row.loop_count) : 0,
         items: items.map(it => ({ id: it.id, kind: it.kind, url: normalizeMediaUrl(it.url), dynamic: !!it.dynamic, sort_order: Number(it.sort_order || 0) }))
       };
       if (session) {
@@ -212,13 +214,23 @@ export async function onRequest(context) {
       const music_enabled = !!body.music_enabled && !!music_url;
       const video_sound = !!body.video_sound;
 
+      // 新列（static_url 定格帧 / loop_count 循环次数）容错：列不存在时忽略，仅保存旧字段
+      let extra = {};
+      try {
+        await supabase(config, '/login_bg_config?select=static_url,loop_count&limit=0', { method: 'GET' });
+        extra.static_url = body.static_url && /^(https:\/\/|\/api\/img\/)/.test(String(body.static_url).trim()) ? String(body.static_url).trim() : null;
+        const lc = parseInt(body.loop_count, 10);
+        extra.loop_count = Number.isFinite(lc) ? Math.min(9, Math.max(0, lc)) : 0;
+      } catch (e) { /* 列尚未添加：跳过 */ }
+
       // 保存配置（幂等 upsert id=1）
       await supabase(config, '/login_bg_config', {
         method: 'POST',
         body: {
           id: 1, enabled, mode, order_mode, template,
           music_enabled, video_sound, music_url, music_name, photo_duration,
-          authorized_users: authorized, updated_by: username, updated_at: new Date().toISOString()
+          authorized_users: authorized, updated_by: username, updated_at: new Date().toISOString(),
+          ...extra
         },
         prefer: 'resolution=merge-duplicates'
       });
