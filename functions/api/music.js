@@ -128,17 +128,20 @@ async function kuwoSearch(keyword) {
   });
   if (!resp.ok) throw new Error('kuwo ' + resp.status);
   const text = await resp.text();
-  if (!text || text.indexOf('MUSICRID') < 0) throw new Error('kuwo empty');
-  // 酷我返回单引号 JSON：按 "MUSICRID" 分段逐字段提取（不整体解析，规避引号格式差异）
-  const segs = text.split("{'MUSICRID':'").slice(1);
+  if (!text || text.indexOf('abslist') < 0) throw new Error('kuwo empty');
+  // 酷我返回单引号 JSON，且字段顺序不定（MUSICRID 可能不在对象开头）：
+  // 先切出 abslist 数组体，再按对象边界 "},{'" 切分，逐对象提取字段
+  const start = text.indexOf("'abslist':[");
+  if (start < 0) throw new Error('kuwo no abslist');
+  const arrText = text.slice(start + 11, text.lastIndexOf(']'));
+  const objs = arrText.split("},{'");
   const out = [];
-  for (const seg of segs) {
-    const ridEnd = seg.indexOf("'");
-    if (ridEnd < 0) continue;
-    const rid = seg.slice(0, ridEnd);
-    const nameM = /'SONGNAME':'([^']*)'/.exec(seg);
-    const artM = /'ARTIST':'([^']*)'/.exec(seg);
-    const durM = /'DURATION':'([^']*)'/.exec(seg);
+  for (const o of objs) {
+    const ridM = /'MUSICRID':'([^']*)'/.exec(o);
+    const nameM = /'SONGNAME':'([^']*)'/.exec(o);
+    const artM = /'ARTIST':'([^']*)'/.exec(o);
+    const durM = /'DURATION':'([^']*)'/.exec(o);
+    const rid = ridM ? ridM[1] : '';
     const name = nameM ? nameM[1].replace(/&nbsp;/g, ' ') : '';
     const artist = artM ? artM[1].replace(/&nbsp;/g, ' ') : '';
     const secs = durM ? parseInt(durM[1], 10) || 0 : 0;
