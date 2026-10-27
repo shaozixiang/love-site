@@ -853,8 +853,8 @@ img, video { max-width: 100%; display: block; }
 }
 #loginBgPlayer .lbg-layer.active, .lbg-preview .lbg-layer.active { opacity: 1; }
 #loginBgPlayer .lbg-photo.dynamic, .lbg-preview .lbg-photo.dynamic { animation: lbgKenBurns 18s ease-in-out infinite alternate; }
-#loginBgPlayer video.lbg-video, .lbg-preview video.lbg-video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; opacity: 0; transition: opacity 1s ease; }
-#loginBgPlayer video.lbg-video.active, .lbg-preview video.lbg-video.active { opacity: 1; }
+#loginBgPlayer video.lbg-video, #loginBgPlayer canvas.lbg-video, .lbg-preview video.lbg-video, .lbg-preview canvas.lbg-video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; opacity: 0; transition: opacity 1s ease; }
+#loginBgPlayer video.lbg-video.active, #loginBgPlayer canvas.lbg-video.active, .lbg-preview video.lbg-video.active, .lbg-preview canvas.lbg-video.active { opacity: 1; }
 #loginBgPlayer .lbg-overlay, .lbg-preview .lbg-overlay { position: absolute; inset: 0; pointer-events: none; }
 @keyframes lbgKenBurns {
     0%   { transform: scale(1) translate(0, 0); }
@@ -871,7 +871,7 @@ img, video { max-width: 100%; display: block; }
 #loginPage.lbg-t2 .lui-card.hero, #loginPage.lbg-t2 .lui-card.login-box { background: rgba(255,255,255,0.72); backdrop-filter: blur(18px) saturate(1.2); -webkit-backdrop-filter: blur(18px) saturate(1.2); box-shadow: var(--sh-lg); }
 
 /* 模板 t3：景深（背景高斯模糊 + 清晰小卡） */
-#loginPage.lbg-t3 .lbg-layer, #loginPage.lbg-t3 video.lbg-video { filter: blur(22px) brightness(0.85); transform: scale(1.12); }
+#loginPage.lbg-t3 .lbg-layer, #loginPage.lbg-t3 .lbg-video { filter: blur(22px) brightness(0.85); transform: scale(1.12); }
 #loginPage.lbg-t3 .lbg-overlay { background: rgba(20,10,16,0.16); }
 #loginPage.lbg-t3 .lui-card.hero, #loginPage.lbg-t3 .lui-card.login-box { background: rgba(255,255,255,0.96); box-shadow: var(--sh-md); }
 
@@ -906,7 +906,7 @@ img, video { max-width: 100%; display: block; }
 /* 预览浮层模板效果（与登录页同一套） */
 .lbg-preview.lbg-t1 .lbg-overlay { background: linear-gradient(180deg, rgba(20,10,16,0.10) 0%, rgba(20,10,16,0.30) 55%, rgba(20,10,16,0.62) 100%); }
 .lbg-preview.lbg-t2 .lbg-overlay { background: linear-gradient(160deg, rgba(20,10,16,0.18) 0%, rgba(20,10,16,0.42) 100%); }
-.lbg-preview.lbg-t3 .lbg-layer, .lbg-preview.lbg-t3 video.lbg-video { filter: blur(22px) brightness(0.85); transform: scale(1.12); }
+.lbg-preview.lbg-t3 .lbg-layer, .lbg-preview.lbg-t3 .lbg-video { filter: blur(22px) brightness(0.85); transform: scale(1.12); }
 .lbg-preview.lbg-t3 .lbg-overlay { background: rgba(20,10,16,0.16); }
 .lbg-preview.lbg-t4 .lbg-overlay { background: linear-gradient(180deg, rgba(246,244,243,0.30) 0%, rgba(246,244,243,0.10) 45%, rgba(20,10,16,0.34) 100%); }
 
