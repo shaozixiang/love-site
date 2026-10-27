@@ -184,6 +184,17 @@ export async function onRequest(context) {
     // 私有仓库：jsdelivr 只服务公开仓库，直接返回 jsdelivr 会 404。
     // 站内代理 /api/img/* 可经 GitHub 只读令牌回源私有仓库（loginbg 前缀已豁免登录），统一走代理。
     const proxyUrl = `/api/img/${githubPath.split('/').map(encodeURIComponent).join('/')}`;
+
+    // 预热边缘缓存：上传后立即触发代理回源整文件并写入 Cloudflare 边缘缓存，
+    // 用户之后打开登录页时命中缓存秒开（避免首次回源 GitHub 私有仓慢导致卡顿）。fire-and-forget 不阻塞响应。
+    if (folder === 'loginbg') {
+      try {
+        const proto = new URL(request.url).protocol || 'https:';
+        const host = request.headers.get('Host') || '';
+        fetch(`${proto}//${host}${proxyUrl}`, { headers: { 'Range': 'bytes=0-' } }).catch(() => {});
+      } catch (e) {}
+    }
+
     return jsonResponse({
       url: proxyUrl,
       cdnUrl: proxyUrl,
