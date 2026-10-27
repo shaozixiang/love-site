@@ -130,6 +130,17 @@ export async function onRequest(context) {
   const action = String(body.action || '');
 
   try {
+    if (action === 'trace') {
+      // 环境取证：登录页加载时上报 UA/屏幕/入口，落 admin_logs 供排查三平台差异（不涉及敏感信息）
+      serverLog(config, '登录页背景-环境上报', 'guest', {
+        ua: String(body.data && body.data.ua || '').slice(0, 400),
+        platform: String(body.data && body.data.platform || '').slice(0, 100),
+        screen: String(body.data && body.data.screen || '').slice(0, 60),
+        href: String(body.data && body.data.href || '').slice(0, 200),
+        v: String(body.data && body.data.v || '').slice(0, 30)
+      });
+      return jsonResponse({ ok: true }, 200, headers);
+    }
     if (action === 'getConfig') {
       // 会话可选：带会话时判断是否可编辑
       let session = null;
