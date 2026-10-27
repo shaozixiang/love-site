@@ -906,3 +906,17 @@ img, video { max-width: 100%; display: block; }
 .lbg-preview.lbg-t3 .lbg-layer, .lbg-preview.lbg-t3 video.lbg-video { filter: blur(22px) brightness(0.85); transform: scale(1.12); }
 .lbg-preview.lbg-t3 .lbg-overlay { background: rgba(20,10,16,0.16); }
 .lbg-preview.lbg-t4 .lbg-overlay { background: linear-gradient(180deg, rgba(246,244,243,0.30) 0%, rgba(246,244,243,0.10) 45%, rgba(20,10,16,0.34) 100%); }
+
+/* 登录页背景：加载提示 + 空列表提示（避免黑屏无反馈） */
+#loginBgPlayer .lbg-status, .lbg-preview .lbg-status {
+    position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+    color: rgba(255,255,255,0.85); font-size: 13px; letter-spacing: 0.08em;
+    background: linear-gradient(180deg, rgba(20,10,16,0.35), rgba(20,10,16,0.55));
+    z-index: 2; text-shadow: 0 1px 8px rgba(0,0,0,0.4);
+}
+#loginBgPlayer .lbg-empty, .lbg-preview .lbg-empty {
+    position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+    text-align: center; color: rgba(255,255,255,0.9); font-size: 14px; line-height: 1.9;
+    background: linear-gradient(160deg, #5c2b40, #2a1420);
+    z-index: 2; padding: 24px;
+}
