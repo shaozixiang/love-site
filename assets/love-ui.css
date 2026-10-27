@@ -853,7 +853,7 @@ img, video { max-width: 100%; display: block; }
 }
 #loginBgPlayer .lbg-layer.active, .lbg-preview .lbg-layer.active { opacity: 1; }
 #loginBgPlayer .lbg-photo.dynamic, .lbg-preview .lbg-photo.dynamic { animation: lbgKenBurns 18s ease-in-out infinite alternate; }
-#loginBgPlayer video.lbg-video, #loginBgPlayer canvas.lbg-video, .lbg-preview video.lbg-video, .lbg-preview canvas.lbg-video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; opacity: 0; transition: opacity 1s ease; }
+#loginBgPlayer video.lbg-video, #loginBgPlayer canvas.lbg-video, .lbg-preview video.lbg-video, .lbg-preview canvas.lbg-video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; opacity: 0; transition: opacity 1s ease; z-index: 1; }
 #loginBgPlayer video.lbg-video.active, #loginBgPlayer canvas.lbg-video.active, .lbg-preview video.lbg-video.active, .lbg-preview canvas.lbg-video.active { opacity: 1; }
 #loginBgPlayer .lbg-overlay, .lbg-preview .lbg-overlay { position: absolute; inset: 0; pointer-events: none; }
 @keyframes lbgKenBurns {
