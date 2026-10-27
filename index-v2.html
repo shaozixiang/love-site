@@ -4,13 +4,13 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
     <title>我们的专属小站</title>
-    <meta name="version" content="20261027i">
-    <link rel="stylesheet" href="assets/love-ui.css?v=20261027i">
+    <meta name="version" content="20261027j">
+    <link rel="stylesheet" href="assets/love-ui.css?v=20261027j">
     <link rel="stylesheet" href="/lib/leaflet.css?v=20261011a">
     <script defer src="/lib/leaflet.js?v=20261011a"></script>
     <script defer src="/lib/supabase-v2.js?v=20261011a"></script>
-    <script defer src="/lib/app-v2.js?v=20261027i"></script>
-    <script defer src="/lib/login-bg.js?v=20261027i"></script>
+    <script defer src="/lib/app-v2.js?v=20261027j"></script>
+    <script defer src="/lib/login-bg.js?v=20261027j"></script>
 
     <style>
 /* ============================================================
@@ -198,6 +198,30 @@
             }
         }
         window.__gateUnlock = unlock;
+        /* 门禁阶段预加载登录页背景媒体：点泡泡时就开始下载视频/照片，解锁后秒开 */
+        try {
+            fetch('/api/login-bg', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'getConfig' }) })
+                .then(function (r) { return r.json(); })
+                .then(function (cfg) {
+                    if (!cfg || !cfg.enabled) return;
+                    var cache = window.__lbgPreloaded = window.__lbgPreloaded || [];
+                    (cfg.items || []).forEach(function (it) {
+                        if (!it || !it.url) return;
+                        var u = it.url.indexOf('http') === 0 ? it.url : location.origin + it.url;
+                        if (it.kind === 'video') {
+                            var v = document.createElement('video');
+                            v.preload = 'auto'; v.muted = true; v.playsInline = true;
+                            v.src = u; v.load(); cache.push(v);
+                        } else {
+                            var im = new Image(); im.src = u; cache.push(im);
+                        }
+                    });
+                    if (cfg.music_url) {
+                        var m = new Audio(); m.preload = 'auto'; m.src = cfg.music_url.indexOf('http') === 0 ? cfg.music_url : location.origin + cfg.music_url;
+                        cache.push(m);
+                    }
+                }).catch(function () {});
+        } catch (e) {}
     })();
     </script>
 
