@@ -147,6 +147,7 @@ export async function onRequest(context) {
         music_enabled: !!row.music_enabled,
         video_sound: !!row.video_sound,
         music_url: row.music_url || null,
+        music_name: row.music_name || null,
         photo_duration: row.photo_duration != null ? Number(row.photo_duration) : 6,
         items: items.map(it => ({ id: it.id, kind: it.kind, url: normalizeMediaUrl(it.url), dynamic: !!it.dynamic, sort_order: Number(it.sort_order || 0) }))
       };
@@ -184,7 +185,9 @@ export async function onRequest(context) {
       const order_mode = VALID_ORDERS.has(body.order_mode) ? body.order_mode : 'sequence';
       const template = VALID_TEMPLATES.has(body.template) ? body.template : 't1';
       let music_url = body.music_url ? String(body.music_url).trim() : null;
-      if (music_url && !/^https:\/\//.test(music_url)) music_url = null;
+      // 允许站内代理路径（/api/music/play?id=... 网易云搜索歌曲）或 https 直链
+      if (music_url && !/^(https:\/\/|\/api\/music\/play\?id=\d+)/.test(music_url)) music_url = null;
+      let music_name = body.music_name ? String(body.music_name).trim().slice(0, 120) : null;
       let photo_duration = Number(body.photo_duration);
       if (!Number.isFinite(photo_duration)) photo_duration = 6;
       photo_duration = Math.min(20, Math.max(3, photo_duration));
@@ -214,7 +217,7 @@ export async function onRequest(context) {
         method: 'POST',
         body: {
           id: 1, enabled, mode, order_mode, template,
-          music_enabled, video_sound, music_url, photo_duration,
+          music_enabled, video_sound, music_url, music_name, photo_duration,
           authorized_users: authorized, updated_by: username, updated_at: new Date().toISOString()
         },
         prefer: 'resolution=merge-duplicates'
