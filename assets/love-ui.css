@@ -855,6 +855,10 @@ img, video { max-width: 100%; display: block; }
 #loginBgPlayer .lbg-photo.dynamic, .lbg-preview .lbg-photo.dynamic { animation: lbgKenBurns 18s ease-in-out infinite alternate; }
 #loginBgPlayer video.lbg-video, #loginBgPlayer canvas.lbg-video, .lbg-preview video.lbg-video, .lbg-preview canvas.lbg-video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; opacity: 0; transition: opacity 1s ease; z-index: 1; }
 #loginBgPlayer video.lbg-video.active, #loginBgPlayer canvas.lbg-video.active, .lbg-preview video.lbg-video.active, .lbg-preview canvas.lbg-video.active { opacity: 1; }
+/* 竖屏手机视频比例适配：双视频层（背景模糊放大填充 + 前景完整 contain）——不拉伸、不变形、不留黑边 */
+#loginBgPlayer .lbg-video-wrap, .lbg-preview .lbg-video-wrap { position: absolute; inset: 0; overflow: hidden; z-index: 1; }
+#loginBgPlayer video.lbg-video-bg, .lbg-preview video.lbg-video-bg { position: absolute; inset: -6%; width: 112%; height: 112%; object-fit: cover; filter: blur(30px) brightness(0.5); transform: scale(1.18); z-index: 1; opacity: 1 !important; }
+#loginBgPlayer video.lbg-video-fg, .lbg-preview video.lbg-video-fg { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; z-index: 2; }
 #loginBgPlayer .lbg-overlay, .lbg-preview .lbg-overlay { position: absolute; inset: 0; pointer-events: none; }
 @keyframes lbgKenBurns {
     0%   { transform: scale(1) translate(0, 0); }
