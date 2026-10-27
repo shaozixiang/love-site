@@ -48,22 +48,38 @@ async function handle({ request, env }) {
     if (!keyword || String(keyword).trim().length < 1) return json({ error: '请输入歌名' }, 400);
     try {
       const q = encodeURIComponent(String(keyword).trim());
-      const resp = await fetch(NETEASE_SEARCH + '?s=' + q + '&type=1&limit=15', {
-        headers: { 'User-Agent': UA, 'Referer': 'https://music.163.com/' }
-      });
-      if (!resp.ok) return json({ error: '音乐服务暂时不可用，请稍后再试' }, 502);
-      const data = await resp.json();
-      const songs = (data && data.result && data.result.songs || []).slice(0, 15).map(function (s) {
-        return {
-          id: s.id,
-          name: s.name || '',
-          artist: (s.artists || []).map(function (a) { return a.name; }).join(' / '),
-          album: (s.album && s.album.name) || '',
-          duration: s.duration || 0,
-          albumPic: (s.album && s.album.picUrl) || ''
-        };
-      });
-      if (!songs.length) return json({ error: '没搜到相关歌曲，换个关键词试试' }, 404);
+      // 多端点 failover：网易云对部分出口 IP 会拒某一端点，依次尝试
+      const endpoints = [
+        'https://music.163.com/api/search/get/web?s=' + q + '&type=1&limit=15',
+        'https://music.163.com/api/search/get?s=' + q + '&type=1&limit=15',
+        'https://music.163.com/api/cloudsearch/pc?s=' + q + '&type=1&limit=15'
+      ];
+      let songs = null;
+      for (const ep of endpoints) {
+        try {
+          const resp = await fetch(ep, {
+            headers: { 'User-Agent': UA, 'Referer': 'https://music.163.com/', 'Accept': 'application/json' }
+          });
+          if (!resp.ok) continue;
+          const data = await resp.json();
+          const list = (data && data.result && data.result.songs) || [];
+          if (!list || !list.length) continue;
+          songs = list.slice(0, 15).map(function (s) {
+            // 兼容 artists（web 接口）与 ar（cloudsearch 接口）两种字段
+            const arts = s.artists || s.ar || [];
+            return {
+              id: s.id,
+              name: s.name || '',
+              artist: arts.map(function (a) { return a.name; }).join(' / '),
+              album: (s.album && s.album.name) || (s.al && s.al.name) || '',
+              duration: s.duration || s.dt || 0,
+              albumPic: (s.album && s.album.picUrl) || (s.al && s.al.picUrl) || ''
+            };
+          });
+          if (songs.length) break;
+        } catch (e) { continue; }
+      }
+      if (!songs || !songs.length) return json({ error: '没搜到相关歌曲，换个关键词试试' }, 404);
       return json({ ok: true, songs: songs });
     } catch (e) {
       return json({ error: '音乐服务暂时不可用，请稍后再试' }, 502);
