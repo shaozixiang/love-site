@@ -47,8 +47,21 @@ async function handle({ request, env }) {
     if (!sessionToken) return json({ error: '需要登录后才能搜索音乐' }, 401);
   }
 
-  if (action === 'search') {
-    if (!keyword || String(keyword).trim().length < 1) return json({ error: '请输入歌名' }, 400);
+  if (action === 'kuwoRaw') {
+    // 临时诊断：暴露酷我搜索 Worker 实际响应，定位失败原因
+    const q = String(keyword || '宝贝').trim();
+    try {
+      const resp = await fetch(KUWO_SEARCH + '?all=' + encodeURIComponent(q) + '&ft=music&itemset=web_2013&client=kt&pn=0&rn=3&rformat=json&encoding=utf8', {
+        headers: { 'User-Agent': UA, 'Referer': 'https://www.kuwo.cn/' }
+      });
+      const text = await resp.text();
+      return json({ status: resp.status, len: text.length, head: text.slice(0, 400), isJson: text.indexOf('MUSICRID') >= 0 });
+    } catch (e) {
+      return json({ error: String(e && e.message || e) }, 500);
+    }
+  }
+
+  if (action === 'search') {    if (!keyword || String(keyword).trim().length < 1) return json({ error: '请输入歌名' }, 400);
     const q = String(keyword).trim();
     // 1) 酷我：完整曲库 + 动态解析完整播放（优先）
     try {
