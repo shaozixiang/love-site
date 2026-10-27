@@ -132,7 +132,7 @@ export async function onRequest(context) {
   try {
     if (action === 'trace') {
       // 环境取证：登录页加载时上报 UA/屏幕/入口，落 admin_logs 供排查三平台差异（不涉及敏感信息）
-      serverLog(config, '登录页背景-环境上报', 'guest', {
+      await serverLog(config, '登录页背景-环境上报', 'guest', {
         ua: String(body.data && body.data.ua || '').slice(0, 400),
         platform: String(body.data && body.data.platform || '').slice(0, 100),
         screen: String(body.data && body.data.screen || '').slice(0, 60),
@@ -255,7 +255,7 @@ export async function onRequest(context) {
         });
       }
 
-      serverLog(config, '登录页背景更新', username, { mode, template, items: items.length, enabled, authorized: authorized.length });
+      await serverLog(config, '登录页背景更新', username, { mode, template, items: items.length, enabled, authorized: authorized.length });
       return jsonResponse({ ok: true, saved: { enabled, mode, template, items: items.length } }, 200, headers);
     }
 
