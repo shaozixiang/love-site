@@ -79,14 +79,25 @@ async function authorizedUsernames(config) {
   return Array.isArray(row && row.authorized_users) ? row.authorized_users : [];
 }
 
+// 私有仓库媒体 URL 归一化：jsdelivr/raw 直链（私有仓必 404）→ 站内代理 /api/img/*（免登录、支持视频 Range）
+function normalizeMediaUrl(u) {
+  if (!u) return u;
+  const s = String(u).trim();
+  let m = s.match(/^https:\/\/cdn\.jsdelivr\.net\/gh\/[^/]+\/[^/]+@[^/]+\/(.+)$/);
+  if (m) return '/api/img/' + m[1];
+  m = s.match(/^https:\/\/raw\.githubusercontent\.com\/[^/]+\/[^/]+\/(?:main|master)\/(.+)$/);
+  if (m) return '/api/img/' + m[1];
+  return s;
+}
+
 function sanitizeItems(items) {
   if (!Array.isArray(items)) return [];
   const out = [];
   const seen = new Set();
   for (const it of items.slice(0, MAX_ITEMS)) {
     if (!it || !it.url || typeof it.url !== 'string') continue;
-    const url = String(it.url).trim();
-    if (!/^https:\/\//.test(url)) continue;
+    const url = normalizeMediaUrl(String(it.url).trim());
+    if (!url || (url.indexOf('/api/img/') !== 0 && !/^https:\/\//.test(url))) continue;
     const kind = it.kind === 'video' ? 'video' : 'photo';
     const key = url + '|' + kind;
     if (seen.has(key)) continue;
@@ -137,7 +148,7 @@ export async function onRequest(context) {
         video_sound: !!row.video_sound,
         music_url: row.music_url || null,
         photo_duration: row.photo_duration != null ? Number(row.photo_duration) : 6,
-        items: items.map(it => ({ id: it.id, kind: it.kind, url: it.url, dynamic: !!it.dynamic, sort_order: Number(it.sort_order || 0) }))
+        items: items.map(it => ({ id: it.id, kind: it.kind, url: normalizeMediaUrl(it.url), dynamic: !!it.dynamic, sort_order: Number(it.sort_order || 0) }))
       };
       if (session) {
         const username = session.username;

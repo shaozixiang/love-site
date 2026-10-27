@@ -920,3 +920,63 @@ img, video { max-width: 100%; display: block; }
     background: linear-gradient(160deg, #5c2b40, #2a1420);
     z-index: 2; padding: 24px;
 }
+
+/* ============ 登录页透明无卡片风（两版共用） ============ */
+.lbg-inner {
+    width: 100%; max-width: 400px; display: flex; flex-direction: column;
+    gap: 14px; padding: 30px 0 56px; margin: auto 0; position: relative; z-index: 1;
+}
+.lbg-brand { text-align: center; padding: 26px 20px 4px; }
+.lbg-brand-heart {
+    width: 64px; height: 64px; margin: 0 auto 14px; display: flex; align-items: center; justify-content: center;
+    border-radius: 50%; background: rgba(255,255,255,.16); border: 1px solid rgba(255,255,255,.4);
+    backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+    color: #fff; box-shadow: 0 10px 34px rgba(0,0,0,.18);
+}
+.lbg-brand-name {
+    font-size: 27px; font-weight: 700; letter-spacing: .14em; color: #fff;
+    text-shadow: 0 2px 20px rgba(0,0,0,.42), 0 1px 3px rgba(0,0,0,.3);
+    font-family: 'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif;
+}
+.lbg-brand-sub { margin-top: 9px; font-size: 12.5px; letter-spacing: .34em; color: rgba(255,255,255,.88); text-shadow: 0 1px 10px rgba(0,0,0,.35); }
+.lbg-form { display: flex; flex-direction: column; gap: 12px; padding: 0 20px; margin-top: 8px; }
+.lbg-input {
+    width: 100%; height: 50px; padding: 0 18px; box-sizing: border-box;
+    border-radius: 16px; font-size: 15px; letter-spacing: .05em; color: #fff;
+    background: rgba(255,255,255,.14);
+    border: 1px solid rgba(255,255,255,.32);
+    backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,.18), 0 6px 22px rgba(0,0,0,.08);
+    outline: none; transition: background .25s ease, border-color .25s ease, box-shadow .25s ease;
+    -webkit-appearance: none; appearance: none;
+}
+.lbg-input::placeholder { color: rgba(255,255,255,.62); }
+.lbg-input:focus { background: rgba(255,255,255,.24); border-color: rgba(255,255,255,.6); box-shadow: inset 0 1px 0 rgba(255,255,255,.2), 0 0 0 4px rgba(255,255,255,.12); }
+.lbg-login-btn {
+    width: 100%; height: 50px; border: none; border-radius: 16px;
+    background: linear-gradient(135deg, #ff8fab, #ff5d8f);
+    color: #fff; font-size: 16px; font-weight: 600; letter-spacing: .32em; text-indent: .32em;
+    cursor: pointer; box-shadow: 0 10px 28px rgba(255,93,143,.38);
+    transition: transform .18s ease, box-shadow .18s ease, opacity .18s ease;
+    -webkit-appearance: none; appearance: none;
+}
+.lbg-login-btn:active { transform: scale(.97); }
+.lbg-login-btn:disabled { opacity: .55; }
+.lbg-reg { text-align: center; margin-top: 4px; font-size: 13px; color: rgba(255,255,255,.88); text-shadow: 0 1px 8px rgba(0,0,0,.3); }
+.lbg-reg a { color: #fff; text-decoration: underline; text-underline-offset: 3px; font-weight: 600; }
+.lbg-version { position: relative; z-index: 1; text-align: center; margin-top: 18px; font-size: 11px; letter-spacing: .22em; color: rgba(255,255,255,.52); text-shadow: 0 1px 6px rgba(0,0,0,.3); }
+
+/* 表单区域底部渐变兜底：任何模板/画面下登录控件都可读（解决文字遮挡） */
+#loginPage .login-inner::before, #loginPage .lbg-inner::before {
+    content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 80%; z-index: -1;
+    background: linear-gradient(180deg, rgba(20,10,16,0) 0%, rgba(20,10,16,.34) 55%, rgba(20,10,16,.68) 100%);
+    pointer-events: none;
+}
+/* 声音提示角标：靠右下且不与表单重叠（表单区已有底部渐变，角标用深底保证可读） */
+#loginBgPlayer .lbg-sound-hint, .lbg-preview .lbg-sound-hint {
+    bottom: 18px; right: 14px; background: rgba(20,10,16,.42);
+    border: 1px solid rgba(255,255,255,.18);
+    backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+    border-radius: 999px; padding: 6px 12px; color: rgba(255,255,255,.92); font-size: 11px;
+    letter-spacing: .06em; z-index: 3;
+}

@@ -4,13 +4,13 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
     <title>我们的专属小站</title>
-    <meta name="version" content="20261027f">
-    <link rel="stylesheet" href="assets/love-ui.css?v=20261027f">
+    <meta name="version" content="20261027g">
+    <link rel="stylesheet" href="assets/love-ui.css?v=20261027g">
     <link rel="stylesheet" href="/lib/leaflet.css?v=20261011a">
     <script defer src="/lib/leaflet.js?v=20261011a"></script>
     <script defer src="/lib/supabase-v2.js?v=20261011a"></script>
-    <script defer src="/lib/app-v2.js?v=20261027f"></script>
-    <script defer src="/lib/login-bg.js?v=20261027f"></script>
+    <script defer src="/lib/app-v2.js?v=20261027g"></script>
+    <script defer src="/lib/login-bg.js?v=20261027g"></script>
 
     <style>
 /* ============================================================
@@ -201,23 +201,23 @@
     })();
     </script>
 
-    <!-- 登录页 -->
+    <!-- 登录页（透明无卡片风） -->
     <div class="login-container" id="loginPage" style="display:none;">
         <div id="loginBgPlayer" class="login-bg-player" style="display:none;"></div>
         <audio id="loginBgAudio" loop preload="auto" style="display:none;"></audio>
         <div class="login-inner">
-            <div class="lui-card hero login-hero-card">
-                <div class="hero-heart"><svg class="lui-icon s32"><use href="assets/icons.svg#i-heart"/></svg></div>
-                <h2>我们的专属小站</h2>
-                <div class="h-sub">登录后查看我们的小世界</div>
+            <div class="lbg-brand">
+                <div class="lbg-brand-heart"><svg class="lui-icon s30"><use href="assets/icons.svg#i-heart"/></svg></div>
+                <div class="lbg-brand-name">我们的专属小站</div>
+                <div class="lbg-brand-sub">登录后查看我们的小世界</div>
             </div>
-            <div class="lui-card login-box">
-                <div class="lui-field"><label class="lui-label">账号</label><input type="text" class="lui-input" id="username" placeholder="账号" autocomplete="username"></div>
-                <div class="lui-field"><label class="lui-label">密码</label><input type="password" class="lui-input" id="password" placeholder="密码" autocomplete="current-password"></div>
-                <button class="lui-btn primary lg block" id="loginBtn" onclick="login()">登录</button>
-                <div class="login-register-link">还没有账号？<a href="javascript:void(0)" onclick="openPublicRegisterModal()">注册账号</a></div>
-                <div class="login-version">专属优化版 · 更快更流畅</div>
+            <div class="lbg-form">
+                <input type="text" class="lbg-input" id="username" placeholder="账号" autocomplete="username">
+                <input type="password" class="lbg-input" id="password" placeholder="密码" autocomplete="current-password">
+                <button class="lbg-login-btn" id="loginBtn" onclick="login()">登 录</button>
+                <div class="lbg-reg">还没有账号？<a href="javascript:void(0)" onclick="openPublicRegisterModal()">注册账号</a></div>
             </div>
+            <div class="lbg-version">专属优化版 · 更快更流畅</div>
         </div>
     </div>
 

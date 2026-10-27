@@ -181,10 +181,12 @@ export async function onRequest(context) {
       return jsonResponse({ error: '上传失败（更新分支）：' + (upd.json && upd.json.message || upd.status) }, upd.status || 502, headers);
     }
 
-    const cdnUrl = `https://cdn.jsdelivr.net/gh/${owner}/${repo}@${branch}/${encodedPath}`;
+    // 私有仓库：jsdelivr 只服务公开仓库，直接返回 jsdelivr 会 404。
+    // 站内代理 /api/img/* 可经 GitHub 只读令牌回源私有仓库（loginbg 前缀已豁免登录），统一走代理。
+    const proxyUrl = `/api/img/${githubPath.split('/').map(encodeURIComponent).join('/')}`;
     return jsonResponse({
-      url: cdnUrl,
-      cdnUrl,
+      url: proxyUrl,
+      cdnUrl: proxyUrl,
       path: githubPath,
       size: file.size,
       contentType: mime || MIME_TO_EXT_LOOKUP(extension) || 'application/octet-stream'

@@ -11,8 +11,11 @@ import { requireSession, readCookie } from '../../_lib/session.js';
 
 // 允许的仓库内路径前缀（按需收紧）
 const ALLOWED_PREFIXES = [
-  '/photos/', '/messages/', '/feeds/', '/memories/', '/bubble/', '/videos/', '/uploads/', '/trash/', '/common/', '/avatars/'
+  '/photos/', '/messages/', '/feeds/', '/memories/', '/bubble/', '/videos/', '/uploads/', '/trash/', '/common/', '/avatars/', '/loginbg/'
 ];
+
+// 登录页背景媒体：设计上对未登录访客可见（登录页展示），无需会话校验
+const PUBLIC_PREFIXES = ['/loginbg/'];
 
 // 边缘缓存 TTL（秒）：
 // - 图片 1 小时（边缘命中后秒开；删除/改名时 trash.js 会主动 purge 本 colo，300s 兜底已放宽）
@@ -32,11 +35,6 @@ export async function onRequest(context) {
     return new Response(null, { status: 204, headers: corsHeaders(aco) });
   }
   try {
-    // 1. 会话校验：cookie 优先，header 兜底
-    const token = readCookie(request.headers.get('Cookie') || '', 'couple_t') || request.headers.get('X-Couple-Token') || '';
-    try { await requireSession({ sessionSecret: env.AUTH_SESSION_SECRET || env.SUPABASE_SERVICE_ROLE_KEY || env.SUPABASE_SERVICE_KEY, supabaseUrl: String(env.SUPABASE_URL || '').replace(/\/$/, ''), serviceKey: env.SUPABASE_SERVICE_ROLE_KEY || env.SUPABASE_SERVICE_KEY }, token); }
-    catch (e) { return jsonResponse({ error: '未登录或登录已失效' }, 401); }
-
     // 2. 解析仓库内路径：仅解码一次，按“段”拆分，拒绝任何 . / .. / 反斜杠段，防路径穿越（H1）
     const url = new URL(request.url);
     const decoded = decodeURIComponent(url.pathname.replace(/^\/api\/img\/?/, ''));
@@ -48,6 +46,13 @@ export async function onRequest(context) {
     const rel = '/' + segs.join('/');
     if (!ALLOWED_PREFIXES.some(p => rel.startsWith(p))) {
       return jsonResponse({ error: '该路径不允许访问' }, 403);
+    }
+
+    // 1. 会话校验：cookie 优先，header 兜底（loginbg 登录页背景对未登录访客可见，豁免）
+    if (!PUBLIC_PREFIXES.some(p => rel.startsWith(p))) {
+      const token = readCookie(request.headers.get('Cookie') || '', 'couple_t') || request.headers.get('X-Couple-Token') || '';
+      try { await requireSession({ sessionSecret: env.AUTH_SESSION_SECRET || env.SUPABASE_SERVICE_ROLE_KEY || env.SUPABASE_SERVICE_KEY, supabaseUrl: String(env.SUPABASE_URL || '').replace(/\/$/, ''), serviceKey: env.SUPABASE_SERVICE_ROLE_KEY || env.SUPABASE_SERVICE_KEY }, token); }
+      catch (e) { return jsonResponse({ error: '未登录或登录已失效' }, 401); }
     }
 
     // 3. 边缘缓存：按“仓库内路径”缓存整文件，所有登录用户共享。
