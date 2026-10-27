@@ -5,7 +5,9 @@ import {
 } from '../_lib/session.js';
 
 const PASSWORD_MIN_LENGTH = 8;   // 注册/改密/重置最小长度（登录路径不做长度校验，保证老账号照常登录）
-const PBKDF2_ITERATIONS = 120000;
+// Cloudflare Workers 的 WebCrypto 基于 V8，PBKDF2 迭代上限 100000（超过即 NotSupportedError）
+// 120000 会导致注册/改密直接报错 "iteration counts above 100000 are not supported"
+const PBKDF2_ITERATIONS = 100000;
 const AVATAR_MAX_BYTES = 500 * 1024;
 // 事件通知实例级限流表（同发布者同类型 30 秒内最多 1 封）
 const NOTIFY_RATE = new Map();
@@ -672,7 +674,7 @@ async function buildPasswordFields(config, password) {
   return { password_hash: await hashPassword(config, password, salt), password_salt: salt };
 }
 
-// 新格式：PBKDF2-HMAC-SHA256（WebCrypto，12 万次迭代），形如 pbkdf2$iter$salt$hash
+// 新格式：PBKDF2-HMAC-SHA256（WebCrypto，10 万次迭代，V8 上限），形如 pbkdf2$iter$salt$hash
 async function hashPassword(config, password, salt) {
   const keyMaterial = await crypto.subtle.importKey('raw', new TextEncoder().encode(password), { name: 'PBKDF2' }, false, ['deriveBits']);
   const bits = await crypto.subtle.deriveBits(
