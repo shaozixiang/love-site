@@ -1,9 +1,12 @@
-// 背景音乐搜索/播放代理
-// search：代理网易云搜索，返回歌曲列表（歌名/歌手/专辑/时长/封面）
-// play：代理网易云外链播放流（每次实时获取，地址永不过期；支持 Range/拖动）
-// 登录态要求：需要有效会话（登录页背景功能的一部分），与 login-bg 同权限模型
+// 背景音乐搜索/解析代理
+// search：优先酷我（完整曲库，返回可动态解析的播放地址）；酷我失败时回退网易云（30s 试听外链）
+// resolve：酷我 rid → 实时获取完整 mp3 直链并 302 重定向（每次新鲜签名，永不过期、永不截断）
+// play：网易云外链代理（仅回退链路使用）
+// 登录态：search 需要有效会话（防滥用）；resolve/play 免登录（登录页未登录时也要播放）
 const NETEASE_SEARCH = 'https://music.163.com/api/search/get/web';
 const NETEASE_OUTER = 'https://music.163.com/song/media/outer/url';
+const KUWO_SEARCH = 'http://search.kuwo.cn/r.s';
+const KUWO_ANTI = 'http://antiserver.kuwo.cn/anti.s';
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36';
 
 export async function onRequestGet(context) {
@@ -21,23 +24,23 @@ function json(body, status) {
 }
 
 async function handle({ request, env }) {
-  // CORS 预检
   if (request.method === 'OPTIONS') return json({ ok: true });
 
   const url = new URL(request.url);
   let action = url.searchParams.get('action');
   let keyword = url.searchParams.get('s');
   let id = url.searchParams.get('id');
+  let rid = url.searchParams.get('rid');
   if (!action && request.method === 'POST') {
     try {
       const body = await request.json();
       action = body.action || action;
       keyword = body.keyword || body.s || keyword;
       id = body.id || id;
+      rid = body.rid || rid;
     } catch (e) {}
   }
 
-  // 搜索需要登录（防滥用）；play 免登录——登录页未登录时也要播放背景音乐（只代理音频流，风险可控）
   const needLogin = action === 'search';
   if (needLogin) {
     const sessionToken = request.headers.get('X-Couple-Token') || (url.searchParams.get('sessionToken') || '');
@@ -46,48 +49,37 @@ async function handle({ request, env }) {
 
   if (action === 'search') {
     if (!keyword || String(keyword).trim().length < 1) return json({ error: '请输入歌名' }, 400);
+    const q = String(keyword).trim();
+    // 1) 酷我：完整曲库 + 动态解析完整播放（优先）
     try {
-      const q = encodeURIComponent(String(keyword).trim());
-      // 多端点 failover：网易云对部分出口 IP 会拒某一端点，依次尝试
-      const endpoints = [
-        'https://music.163.com/api/search/get/web?s=' + q + '&type=1&limit=15',
-        'https://music.163.com/api/search/get?s=' + q + '&type=1&limit=15',
-        'https://music.163.com/api/cloudsearch/pc?s=' + q + '&type=1&limit=15'
-      ];
-      let songs = null;
-      for (const ep of endpoints) {
-        try {
-          const resp = await fetch(ep, {
-            headers: { 'User-Agent': UA, 'Referer': 'https://music.163.com/', 'Accept': 'application/json' }
-          });
-          if (!resp.ok) continue;
-          const data = await resp.json();
-          const list = (data && data.result && data.result.songs) || [];
-          if (!list || !list.length) continue;
-          songs = list.slice(0, 15).map(function (s) {
-            // 兼容 artists（web 接口）与 ar（cloudsearch 接口）两种字段
-            const arts = s.artists || s.ar || [];
-            return {
-              id: s.id,
-              name: s.name || '',
-              artist: arts.map(function (a) { return a.name; }).join(' / '),
-              album: (s.album && s.album.name) || (s.al && s.al.name) || '',
-              duration: s.duration || s.dt || 0,
-              albumPic: (s.album && s.album.picUrl) || (s.al && s.al.picUrl) || ''
-            };
-          });
-          if (songs.length) break;
-        } catch (e) { continue; }
-      }
-      if (!songs || !songs.length) return json({ error: '没搜到相关歌曲，换个关键词试试' }, 404);
-      return json({ ok: true, songs: songs });
+      const songs = await kuwoSearch(q);
+      if (songs && songs.length) return json({ ok: true, songs: songs, source: 'kuwo' });
+    } catch (e) {}
+    // 2) 网易云回退：多端点 failover（试听 30s 外链）
+    try {
+      const songs = await neteaseSearch(q);
+      if (songs && songs.length) return json({ ok: true, songs: songs, source: 'netease' });
+    } catch (e) {}
+    return json({ error: '没搜到相关歌曲，换个关键词试试' }, 404);
+  }
+
+  if (action === 'resolve') {
+    // 酷我 rid → 实时拿完整 mp3 直链 → 302 重定向（audio 元素自动跟随，无 CORS 限制）
+    if (!/^MUSIC_\d+$/.test(String(rid || ''))) return json({ error: '参数错误' }, 400);
+    try {
+      const antiResp = await fetch(KUWO_ANTI + '?format=mp3&rid=' + encodeURIComponent(rid) + '&type=convert_url&response=url', {
+        headers: { 'User-Agent': UA }
+      });
+      if (!antiResp.ok) return json({ error: '获取播放地址失败' }, 502);
+      const direct = (await antiResp.text()).trim();
+      if (!/^https?:\/\//.test(direct)) return json({ error: '该歌曲暂时无法播放' }, 404);
+      return new Response(null, { status: 302, headers: { Location: direct } });
     } catch (e) {
-      return json({ error: '音乐服务暂时不可用，请稍后再试' }, 502);
+      return json({ error: '播放服务暂时不可用，请稍后再试' }, 502);
     }
   }
 
   if (action === 'play') {
-    // id 必须纯数字，防注入
     if (!/^\d+$/.test(String(id || ''))) return json({ error: '参数错误' }, 400);
     try {
       const upstream = await fetch(NETEASE_OUTER + '?id=' + id + '.mp3', {
@@ -99,16 +91,13 @@ async function handle({ request, env }) {
         }
       });
       const ctype = upstream.headers.get('content-type') || '';
-      // 网易云返回 text/html 表示该曲无外链/404
       if (!upstream.ok && upstream.status !== 206) return json({ error: '该歌曲暂时无法播放（可能无版权外链）' }, 404);
       if (ctype.indexOf('text/html') >= 0) return json({ error: '该歌曲暂时无法播放（可能无版权外链）' }, 404);
       const headers = new Headers();
       headers.set('Content-Type', ctype || 'audio/mpeg');
       headers.set('Cache-Control', 'public, max-age=3600');
       headers.set('Accept-Ranges', 'bytes');
-      if (upstream.status === 206 && upstream.headers.get('content-range')) {
-        headers.set('Content-Range', upstream.headers.get('content-range'));
-      }
+      if (upstream.status === 206 && upstream.headers.get('content-range')) headers.set('Content-Range', upstream.headers.get('content-range'));
       if (upstream.headers.get('content-length')) headers.set('Content-Length', upstream.headers.get('content-length'));
       return new Response(upstream.body, { status: upstream.status, headers: headers });
     } catch (e) {
@@ -117,4 +106,73 @@ async function handle({ request, env }) {
   }
 
   return json({ error: '参数错误' }, 400);
+}
+
+// 酷我搜索：返回 {id: rid, name, artist, duration(ms), url: resolve 代理}
+async function kuwoSearch(keyword) {
+  const resp = await fetch(KUWO_SEARCH + '?all=' + encodeURIComponent(keyword) + '&ft=music&itemset=web_2013&client=kt&pn=0&rn=15&rformat=json&encoding=utf8', {
+    headers: { 'User-Agent': UA }
+  });
+  if (!resp.ok) throw new Error('kuwo ' + resp.status);
+  const text = await resp.text();
+  if (!text || text.indexOf('MUSICRID') < 0) throw new Error('kuwo empty');
+  // 酷我返回单引号 JSON：按 "MUSICRID" 分段逐字段提取（不整体解析，规避引号格式差异）
+  const segs = text.split("{'MUSICRID':'").slice(1);
+  const out = [];
+  for (const seg of segs) {
+    const ridEnd = seg.indexOf("'");
+    if (ridEnd < 0) continue;
+    const rid = seg.slice(0, ridEnd);
+    const nameM = /'SONGNAME':'([^']*)'/.exec(seg);
+    const artM = /'ARTIST':'([^']*)'/.exec(seg);
+    const durM = /'DURATION':'([^']*)'/.exec(seg);
+    const name = nameM ? nameM[1].replace(/&nbsp;/g, ' ') : '';
+    const artist = artM ? artM[1].replace(/&nbsp;/g, ' ') : '';
+    const secs = durM ? parseInt(durM[1], 10) || 0 : 0;
+    if (!rid || !name) continue;
+    out.push({
+      id: rid,
+      name: name,
+      artist: artist || '',
+      album: '',
+      duration: secs * 1000,
+      url: '/api/music?action=resolve&rid=' + rid
+    });
+    if (out.length >= 15) break;
+  }
+  return out;
+}
+
+// 网易云搜索：兼容 artists/ar 字段；duration 毫秒
+async function neteaseSearch(keyword) {
+  const q = encodeURIComponent(keyword);
+  const endpoints = [
+    'https://music.163.com/api/search/get/web?s=' + q + '&type=1&limit=15',
+    'https://music.163.com/api/search/get?s=' + q + '&type=1&limit=15',
+    'https://music.163.com/api/cloudsearch/pc?s=' + q + '&type=1&limit=15'
+  ];
+  for (const ep of endpoints) {
+    try {
+      const resp = await fetch(ep, {
+        headers: { 'User-Agent': UA, 'Referer': 'https://music.163.com/', 'Accept': 'application/json' }
+      });
+      if (!resp.ok) continue;
+      const data = await resp.json();
+      const list = (data && data.result && data.result.songs) || [];
+      if (!list || !list.length) continue;
+      return list.slice(0, 15).map(function (s) {
+        const arts = s.artists || s.ar || [];
+        return {
+          id: s.id,
+          name: s.name || '',
+          artist: arts.map(function (a) { return a.name; }).join(' / '),
+          album: (s.album && s.album.name) || (s.al && s.al.name) || '',
+          duration: s.duration || s.dt || 0,
+          albumPic: (s.album && s.album.picUrl) || (s.al && s.al.picUrl) || '',
+          url: ''
+        };
+      });
+    } catch (e) { continue; }
+  }
+  return [];
 }
