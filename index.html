@@ -3,14 +3,14 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <meta name="version" content="20261027m">
+    <meta name="version" content="20261027n">
     <title>我们的专属小站</title>
-    <link rel="stylesheet" href="assets/love-ui.css?v=20261027m">
+    <link rel="stylesheet" href="assets/love-ui.css?v=20261027n">
     <link rel="stylesheet" href="/lib/leaflet.css?v=20261011a">
     <script defer src="/lib/leaflet.js?v=20261011a"></script>
     <script defer src="/lib/supabase.min.js?v=20261011a"></script>
-    <script defer src="/lib/app.js?v=20261027m"></script>
-    <script defer src="/lib/login-bg.js?v=20261027m"></script>
+    <script defer src="/lib/app.js?v=20261027n"></script>
+    <script defer src="/lib/login-bg.js?v=20261027n"></script>
     <style>
     /* ===== 页面专属样式：只允许使用 love-ui.css 的 token，禁止硬编码颜色 ===== */
     body { overflow-x: hidden; }
@@ -42,10 +42,10 @@
 
     /* 用户工具下拉 */
     .dropdown-menu { position: absolute; top: 48px; right: 0; background: var(--elev); border: 1px solid var(--line); border-radius: var(--r-md); box-shadow: var(--sh-lg); z-index: 300; min-width: 176px; overflow: hidden; display: none; padding: 5px; }
-    .dropdown-menu button { width: 100%; display: flex; align-items: center; gap: 9px; padding: 11px 12px; border-radius: 10px; background: none; border: none; text-align: left; font-size: var(--f-sub); color: var(--ink); cursor: pointer; }
+    .dropdown-menu button { width: 100%; display: flex; align-items: center; gap: 9px; padding: 11px 12px; border-radius: 10px; background: none; border: none; text-align: left; font-size: var(--f-sub); color: var(--ink); cursor: pointer; white-space: nowrap; line-height: 1.4; }
     .dropdown-menu button:active { background: var(--tint); }
     .dropdown-menu button.danger { color: var(--red); }
-    .dropdown-menu .lui-icon { color: var(--ink-3); }
+    .dropdown-menu .lui-icon { color: var(--ink-3); width: 18px; height: 18px; flex: none; }
 
     /* 相册媒体网格 / 评论行 */
     .feed-media { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin: 10px 0; }
