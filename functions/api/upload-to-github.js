@@ -10,7 +10,8 @@ import {
   readCookie, randomHex
 } from '../_lib/session.js';
 
-const MAX_IMAGE_BYTES = 10 * 1024 * 1024;   // 图片 10MB
+const MAX_IMAGE_BYTES = 10 * 1024 * 1024;   // 普通图片 10MB
+const MAX_GIF_HEIC_BYTES = 20 * 1024 * 1024; // 动图(GIF)/实况照片(HEIC) 20MB（Git Data base64 ≤100MB 以内）
 const MAX_VIDEO_BYTES = 30 * 1024 * 1024;   // 视频 30MB
 const MAX_AUDIO_BYTES = 20 * 1024 * 1024;   // 音频 20MB
 const ALLOWED_FOLDERS = new Set(['common', 'feeds', 'messages', 'bubbles', 'avatars', 'loginbg']);
@@ -92,13 +93,16 @@ export async function onRequest(context) {
     if (kind === false) {
       return jsonResponse({ error: '不支持这个文件格式：请上传 jpg/png/gif/webp/heic/avif 照片，mp4/mov/webm/3gp 视频，或 mp3/m4a/wav/ogg 音乐。' }, 400, headers);
     }
-    const extension = getExtension(file.name, mime, kind);
+    const arrayBuffer = await file.arrayBuffer();
+    const extension = getExtension(file.name, mime, kind, arrayBuffer);
     if (!extension) {
       return jsonResponse({ error: '无法识别这个文件的类型：请上传 jpg/png/gif/webp/heic/avif 照片，mp4/mov/webm/3gp 视频，或 mp3/m4a/wav/ogg 音乐。' }, 400, headers);
     }
 
-    // 大小上限：图片 10MB / 视频 30MB / 音频 20MB（Git Data blob 支持 base64 ≤100MB）
-    const maxBytes = kind === 'image' ? MAX_IMAGE_BYTES : (kind === 'video' ? MAX_VIDEO_BYTES : (kind === 'audio' ? MAX_AUDIO_BYTES : MAX_IMAGE_BYTES));
+    // 大小上限：图片 10MB / 动图与实况照片(GIF/HEIC) 20MB / 视频 30MB / 音频 20MB（Git Data blob 支持 base64 ≤100MB）
+    const maxBytes = (kind === 'image' && (extension === 'gif' || extension === 'heic'))
+      ? MAX_GIF_HEIC_BYTES
+      : (kind === 'image' ? MAX_IMAGE_BYTES : (kind === 'video' ? MAX_VIDEO_BYTES : (kind === 'audio' ? MAX_AUDIO_BYTES : MAX_IMAGE_BYTES)));
     if (file.size > maxBytes) {
       const limitMb = Math.round(maxBytes / 1024 / 1024);
       return jsonResponse({ error: `文件过大：${kind === 'video' ? '视频' : (kind === 'audio' ? '音乐' : '图片')}请控制在 ${limitMb}MB 以内。` }, 413, headers);
@@ -134,7 +138,7 @@ export async function onRequest(context) {
     const objectName = `${Date.now()}-${randomHex(4)}.${extension}`;
     const githubPath = `${folder}/${datedFolder}/${objectName}`;
     const encodedPath = githubPath.split('/').map(encodeURIComponent).join('/');
-    const content = arrayBufferToBase64(await file.arrayBuffer());
+    const content = arrayBufferToBase64(arrayBuffer);
 
     // Git Data API：create blob → tree → commit → update ref
     const gh = (path, opts = {}) => ghFetch(owner, repo, ghToken, path, opts);
@@ -241,15 +245,37 @@ function extFromFilename(filename) {
   return ext && ALLOWED_EXT.has(ext) ? ext : null;
 }
 
-function getExtension(filename, contentType, kind) {
+function getExtension(filename, contentType, kind, buffer) {
   // 标准 MIME 映射优先（忽略文件名里的可疑后缀，例如伪造 .html 的图片）
   if (contentType && MIME_TO_EXT[contentType]) return MIME_TO_EXT[contentType];
   const nameExt = extFromFilename(filename);
-  if (kind === 'image') return nameExt || 'jpg'; // 其他图片格式兜底为 jpg
+  if (kind === 'image') return nameExt || sniffImageExt(buffer) || 'jpg'; // 其他图片格式兜底为 jpg
   if (kind === 'video') return nameExt || 'mp4'; // 其他视频格式兜底为 mp4
   if (kind === 'audio') return nameExt || 'mp3'; // 其他音频格式兜底为 mp3
-  // 类型未知（浏览器未报 type 或 octet-stream）：只能依赖文件名扩展名白名单
-  return nameExt;
+  // 类型未知（浏览器未报 type 或 octet-stream）：先试文件名扩展名，再读文件头 magic bytes 识别（兼容微信/部分手机 MIME 为空）
+  return nameExt || sniffImageExt(buffer);
+}
+
+// 读文件头 magic bytes 识别图片类型（不依赖 file.type/文件名）：
+// 解决微信内置浏览器/部分手机上传动图时 MIME 为空、文件名无扩展名导致的“无法识别”失败
+function sniffImageExt(buffer) {
+  if (!buffer || buffer.length < 12) return null;
+  const b = new Uint8Array(buffer);
+  // GIF87a / GIF89a
+  if (b[0] === 0x47 && b[1] === 0x49 && b[2] === 0x46 && b[3] === 0x38) return 'gif';
+  // PNG
+  if (b[0] === 0x89 && b[1] === 0x50 && b[2] === 0x4e && b[3] === 0x47) return 'png';
+  // JPEG FF D8 FF
+  if (b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff) return 'jpg';
+  // WebP: RIFF....WEBP
+  if (b[0] === 0x52 && b[1] === 0x49 && b[2] === 0x46 && b[3] === 0x46 && b[8] === 0x57 && b[9] === 0x45 && b[10] === 0x42 && b[11] === 0x50) return 'webp';
+  // HEIC / HEIF / AVIF: ftyp box（ISO BMFF）
+  if (b[4] === 0x66 && b[5] === 0x74 && b[6] === 0x79 && b[7] === 0x70) {
+    const major = String.fromCharCode(b[8], b[9], b[10], b[11]);
+    if (major === 'avif') return 'avif';
+    if (major === 'heic' || major === 'heix' || major === 'hevc' || major === 'mif1' || major === 'msf1') return 'heic';
+  }
+  return null;
 }
 
 function arrayBufferToBase64(buffer) {
