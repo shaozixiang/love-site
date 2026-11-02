@@ -4,15 +4,16 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
     <title>我们的专属小站</title>
-    <meta name="version" content="20261027av">
-<script>try{if(!location.search.match(/[?&]v=/)){location.replace(location.pathname+location.hash+'?v=20261027av');}}catch(e){}</script>
+    <meta name="version" content="20261027aw">
+<script>try{if(!location.search.match(/[?&]v=/)){location.replace(location.pathname+location.hash+'?v=20261027aw');}}catch(e){}</script>
 
-    <link rel="stylesheet" href="assets/love-ui.css?v=20261027av">
+    <script>try{var t=localStorage.getItem('couple_theme')||'rose';if(t&&document.documentElement)document.documentElement.setAttribute('data-theme',t);}catch(e){}</script>
+    <link rel="stylesheet" href="assets/love-ui.css?v=20261027aw">
     <link rel="stylesheet" href="/lib/leaflet.css?v=20261011a">
     <script defer src="/lib/leaflet.js?v=20261011a"></script>
     <script defer src="/lib/supabase-v2.js?v=20261011a"></script>
-    <script defer src="/lib/app-v2.js?v=20261027av"></script>
-    <script defer src="/lib/login-bg.js?v=20261027av"></script>
+    <script defer src="/lib/app-v2.js?v=20261027aw"></script>
+    <script defer src="/lib/login-bg.js?v=20261027aw"></script>
 
     <style>
 /* ============================================================
@@ -139,8 +140,8 @@
 .vis-btn.is-hidden { background: var(--amber-tint); color: var(--amber); }
 .vis-badge { display: inline-flex; background: var(--amber-tint); color: var(--amber); border-radius: 999px; padding: 3px 9px; font-size: 11px; font-weight: 600; margin-left: 6px; align-items: center; gap: 3px; }
 
-/* ===== Toast 容器（toast 本体由 LUI 提供） ===== */
-#toastBox { position: fixed; inset: 0; pointer-events: none; z-index: 1000; }
+/* ===== Toast 容器（toast 本体由 LUI 提供；必须全站最顶，否则被全屏查看器/预览/弹层遮挡） ===== */
+#toastBox { position: fixed; inset: 0; pointer-events: none; z-index: 99999; }
 
 /* 隐私单选（感动的话） */
 .priv-seg { flex: 1 0 auto; display: inline-flex; align-items: center; justify-content: center; gap: 5px; min-height: 34px; padding: 0 14px; border-radius: 9px; font-size: var(--f-sub); font-weight: 600; color: var(--ink-2); cursor: pointer; }

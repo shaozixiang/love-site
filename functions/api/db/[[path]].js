@@ -36,8 +36,25 @@ const VISIBILITY_TABLES = new Set([
   'feeds', 'messages', 'loves', 'memories', 'memos',
   'schedules', 'countdowns', 'travel_markers'
 ]);
-// 情侣账号（硬编码，与前端一致）：可看 couple_only
-const COUPLE_USERNAMES = new Set(['boy', 'girl']);
+// 情侣账号默认（硬编码，兼容旧数据）：可看 couple_only；管理员可在 site_config 的
+// couple_usernames 键配置实际情侣账号（JSON 数组或逗号分隔），配置后优先于默认值
+const DEFAULT_COUPLE_USERNAMES = new Set(['boy', 'girl']);
+
+// 动态读取情侣账号名单：解决“情侣改名后判断失效”与“实际账号非 boy/girl 时仅情侣可见失效”
+async function getCoupleUsernames(config) {
+  try {
+    const r = await fetch(`${config.supabaseUrl}/rest/v1/site_config?key=eq.couple_usernames&select=value&limit=1`, { headers: authHeaders(config) });
+    if (!r.ok) return DEFAULT_COUPLE_USERNAMES;
+    const rows = await r.json();
+    const raw = (rows && rows[0] && rows[0].value) ? rows[0].value : '';
+    if (!raw) return DEFAULT_COUPLE_USERNAMES;
+    let names = [];
+    try { const p = JSON.parse(raw); if (Array.isArray(p)) names = p; } catch (e) {}
+    if (names.length === 0) names = String(raw).split(',').map(s => s.trim()).filter(Boolean);
+    const set = new Set(names.map(s => String(s).trim()).filter(Boolean));
+    return set.size > 0 ? set : DEFAULT_COUPLE_USERNAMES;
+  } catch (e) { return DEFAULT_COUPLE_USERNAMES; }
+}
 // users 表中绝不能通过数据代理下发的敏感列
 const SENSITIVE_USER_COLS = ['password_hash', 'password_salt', 'password'];
 
@@ -86,7 +103,7 @@ export async function onRequest(context) {
 
     // 角色只判定一次（管理员/情侣账号）
     const isAdmin = await checkAdmin(config, session.username);
-    const isCouple = COUPLE_USERNAMES.has(session.username);
+    const isCouple = (await getCoupleUsernames(config)).has(session.username);
 
     // 读操作：操作日志仅管理员可查看（M1/S2）
     if ((method === 'GET' || method === 'HEAD') && table === 'admin_logs') {

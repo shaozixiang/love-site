@@ -183,6 +183,8 @@ async function handleAction(config, body, request) {
   if (action === 'track') return trackEvents(config, body, request);
   // 登录页公开查询注册配置（无需登录）。只返回是否开放注册/通道是否开启，绝不泄露邀请码本身
   if (action === 'getRegisterOpen') return getRegisterOpen(config);
+  // 公开读取主题设置（游客登录页也需应用主题）；写主题需管理员
+  if (action === 'getTheme') return getTheme(config);
 
   const session = await requireSession(config, body.sessionToken);
   if (action === 'me') return { user: await getPublicUser(config, session.username) };
@@ -208,6 +210,7 @@ async function handleAction(config, body, request) {
   if (action === 'getSignupCode') return requireAdminThen(config, session.username, () => getSignupCode(config));
   if (action === 'getBubbleConfig') return requireAdminThen(config, session.username, () => getBubbleConfig(config));
   if (action === 'setBubbleConfig') return requireAdminThen(config, session.username, () => setBubbleConfig(config, body));
+  if (action === 'setTheme') return requireAdminThen(config, session.username, () => setTheme(config, body));
   if (action === 'testNotify') return requireAdminThen(config, session.username, () => testNotify(config, session.username, body));
   if (action === 'logout') return logout(config, session.username);
 
@@ -307,6 +310,22 @@ async function getSignupCode(config) {
     register_open: m.register_open === '1' || m.register_open === 'true' || m.register_open === true
   };
 }
+
+// ---------- UI 主题 ----------
+const THEME_KEYS = ['rose', 'dark', 'moonlight', 'sakura', 'matcha', 'caramel', 'lavender', 'ocean', 'nightgold', 'ivory'];
+async function getTheme(config) {
+  let m = {};
+  try { m = await getSiteValues(config); } catch (e) { return { theme: 'rose', themes: THEME_KEYS }; }
+  const theme = m.ui_theme || 'rose';
+  return { theme: THEME_KEYS.indexOf(theme) >= 0 ? theme : 'rose', themes: THEME_KEYS };
+}
+async function setTheme(config, body) {
+  const theme = String(body.theme || 'rose');
+  if (THEME_KEYS.indexOf(theme) < 0) throw httpError(400, '不支持的主题：' + theme);
+  await setSiteValue(config, 'ui_theme', theme);
+  return { ok: true, theme };
+}
+
 
 // 登录页公开查询（无需登录）：只暴露"是否需要邀请码"，不返回邀请码内容
 async function getRegisterOpen(config) {
@@ -421,6 +440,23 @@ async function changeUsername(config, username, body) {
     }
     throw httpError(400, msg || '修改失败');
   }
+
+  // 级联补漏：登录页背景授权列表（login_bg_config.authorized_users 为 text[]）
+  // 不在 change_username 覆盖范围内，改名后旧名残留会导致授权用户悄悄失去背景设置权限
+  try {
+    const cfgRows = await supabase(config, '/login_bg_config?select=id,authorized_users&limit=1', { method: 'GET' });
+    if (cfgRows && cfgRows[0]) {
+      const row = cfgRows[0];
+      const arr = Array.isArray(row.authorized_users) ? row.authorized_users : [];
+      const next = arr.map(u => (u === username ? newName : u));
+      if (next.join('\u0000') !== arr.join('\u0000')) {
+        await supabase(config, `/login_bg_config?id=eq.${encodeURIComponent(row.id)}`, {
+          method: 'PATCH',
+          body: { authorized_users: next, updated_by: newName, updated_at: new Date().toISOString() }
+        });
+      }
+    }
+  } catch (e) { /* 表未初始化/已删除时跳过，不阻断改名 */ }
 
   // 改名成功，重新读取新账号并签发新会话
   const newUser = await fetchUser(config, newName, USER_COLUMNS);
