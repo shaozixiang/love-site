@@ -7,7 +7,7 @@
 //   4. HTML 入口用 HTMLRewriter 改写资源路径并注入 window.__TENANT__
 // ============================================================
 
-import { getConfig, authHeaders } from '../../_lib/session.js';
+import { getConfig, authHeaders } from '../_lib/session.js';
 
 const SLUG_RE = /^[a-z0-9][a-z0-9-]{1,30}[a-z0-9]$/;
 
