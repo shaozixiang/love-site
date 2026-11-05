@@ -3,17 +3,16 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <meta name="version" content="20261106ax">
-<script>try{if(!location.search.match(/[?&]v=/)){location.replace(location.pathname+location.hash+'?v=20261106ax');}}catch(e){}</script>
+    <meta name="version" content="20261106ay">
+<script>try{if(!location.search.match(/[?&]v=/)){location.replace(location.pathname+location.hash+'?v=20261106ay');}}catch(e){}</script>
 
     <title>我们的专属小站</title>
     <script>try{var t=localStorage.getItem('couple_theme')||'rose';if(t&&document.documentElement)document.documentElement.setAttribute('data-theme',t);}catch(e){}</script>
-    <link rel="stylesheet" href="assets/love-ui.css?v=20261106ax">
+    <link rel="stylesheet" href="assets/love-ui.css?v=20261106ay">
     <link rel="stylesheet" href="/lib/leaflet.css?v=20261011a">
     <script defer src="/lib/leaflet.js?v=20261011a"></script>
     <script defer src="/lib/supabase.min.js?v=20261011a"></script>
-    <script defer src="/lib/app.js?v=20261106ax"></script>
-    <script defer src="/lib/login-bg.js?v=20261106ax"></script>
+    <script defer src="/lib/app.js?v=20261106ay"></script>
     <style>
     /* ===== 页面专属样式：只允许使用 love-ui.css 的 token，禁止硬编码颜色 ===== */
     body { overflow-x: hidden; }
@@ -196,52 +195,27 @@
             }
         }
         window.__gateUnlock = unlock;
-        /* 门禁阶段预加载登录页背景媒体：点泡泡时就开始下载视频/照片，解锁后秒开 */
-        try {
-            var __tb = (window.__TENANT__ && window.__TENANT__.base) || '';
-            fetch(__tb + '/api/login-bg', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'getConfig' }) })
-                .then(function (r) { return r.json(); })
-                .then(function (cfg) {
-                    if (!cfg || !cfg.enabled) return;
-                    var cache = window.__lbgPreloaded = window.__lbgPreloaded || [];
-                    (cfg.items || []).forEach(function (it) {
-                        if (!it || !it.url) return;
-                        var u = it.url.indexOf('http') === 0 ? it.url : location.origin + (__tb && it.url.charAt(0) === '/' && it.url.indexOf(__tb + '/') !== 0 ? __tb + it.url : it.url);
-                        if (it.kind === 'video') {
-                            var v = document.createElement('video');
-                            v.preload = 'auto'; v.muted = true; v.playsInline = true;
-                            v.setAttribute('playsinline',''); v.setAttribute('webkit-playsinline',''); v.setAttribute('x5-playsinline',''); v.setAttribute('x5-video-player-type','h5'); v.setAttribute('x5-video-player-fullscreen','false');
-                            v.src = u; v.load(); cache.push(v);
-                        } else {
-                            var im = new Image(); im.src = u; cache.push(im);
-                        }
-                    });
-                    if (cfg.music_url) {
-                        var m = new Audio(); m.preload = 'auto'; m.src = cfg.music_url.indexOf('http') === 0 ? cfg.music_url : location.origin + cfg.music_url;
-                        cache.push(m);
-                    }
-                }).catch(function () {});
-        } catch (e) {}
     })();
     </script>
 
-    <!-- ============ 登录页（透明无卡片风） ============ -->
+    <!-- ============ 登录页（卡片式） ============ -->
     <div id="loginPage">
-        <div id="loginBgPlayer" class="login-bg-player" style="display:none;"></div>
-        <audio id="loginBgAudio" loop preload="auto" style="display:none;"></audio>
-        <div class="lbg-inner">
-            <div class="lbg-brand">
-                <div class="lbg-brand-heart"><svg class="lui-icon s30"><use href="assets/icons.svg#i-heart"/></svg></div>
-                <div class="lbg-brand-name">我们的专属小站</div>
-                <div class="lbg-brand-sub">登录后查看我们的小世界</div>
+        <div class="lui-shell" style="display:flex;flex-direction:column;gap:16px;width:100%;max-width:400px;">
+            <div class="lui-card hero" style="padding:26px 22px;text-align:center;">
+                <div style="display:inline-flex;background:rgba(255,255,255,.2);border:1px solid rgba(255,255,255,.35);border-radius:50%;width:56px;height:56px;align-items:center;justify-content:center;margin-bottom:12px;">
+                    <svg class="lui-icon s28" style="color:#fff;"><use href="assets/icons.svg#i-heart"/></svg>
+                </div>
+                <h2 class="h-title" style="font-size:22px;">我们的专属小站</h2>
+                <div class="h-sub" style="margin-top:6px;font-size:13px;">登录后查看我们的小世界</div>
             </div>
-            <div class="lbg-form">
-                <input type="text" class="lbg-input" id="username" placeholder="账号" autocomplete="username">
-                <input type="password" class="lbg-input" id="password" placeholder="密码" autocomplete="current-password">
-                <button class="lbg-login-btn" id="loginBtn" onclick="login()">登 录</button>
-                <div class="lbg-reg">还没有账号？<a href="javascript:void(0)" onclick="openPublicRegisterModal()">注册账号</a></div>
+            <div class="lui-card">
+                <div class="lui-field"><label>账号</label><input type="text" class="lui-input" id="username" placeholder="请输入账号" autocomplete="username"></div>
+                <div class="lui-field"><label>密码</label><input type="password" class="lui-input" id="password" placeholder="请输入密码" autocomplete="current-password"></div>
+                <button class="lui-btn primary block submit-btn" id="loginBtn" onclick="login()">登录</button>
+                <div style="margin-top:14px;text-align:center;font-size:var(--f-mini);color:var(--ink-3);">
+                    还没有账号？<a href="javascript:void(0)" onclick="openPublicRegisterModal()">注册账号</a>
+                </div>
             </div>
-            <div class="lbg-version">经典版 · 快而流畅</div>
         </div>
     </div>
 
@@ -267,7 +241,6 @@
                 <div class="dropdown-menu" id="dropdownMenu">
                     <button onclick="openUsernameModal()"><svg class="lui-icon s16"><use href="assets/icons.svg#i-pencil"/></svg>修改用户名</button>
                     <button onclick="openPasswordModal()"><svg class="lui-icon s16"><use href="assets/icons.svg#i-lock"/></svg>修改密码</button>
-                    <button onclick="openLoginBgEntry()" id="loginBgEntryBtn" style="display:none;"><svg class="lui-icon s16"><use href="assets/icons.svg#i-film"/></svg>登录页背景</button>
                     <button onclick="openAdminPanel()" id="adminEntryBtn" style="display:none;"><svg class="lui-icon s16"><use href="assets/icons.svg#i-shield-check"/></svg>管理后台</button>
                     <button class="danger" onclick="logout()"><svg class="lui-icon s16"><use href="assets/icons.svg#i-log-out"/></svg>退出登录</button>
                 </div>
@@ -535,7 +508,5 @@
     <!-- Toast 容器 -->
     <div id="toastBox"></div>
 
-    <!-- 登录页背景：预览浮层 -->
-    <div id="loginBgPreview" class="lbg-preview" style="display:none;"></div>
 </body>
 </html>

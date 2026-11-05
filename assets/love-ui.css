@@ -20,7 +20,7 @@
     /* 文字 */
     --ink: #1E191B;
     --ink-2: #5C5357;
-    --ink-3: #9A8F93;
+    --ink-3: #81787B;
     --ink-inv: #FFFFFF;
 
     /* 发丝线 */
@@ -159,7 +159,7 @@
 :root[data-theme="moonlight"] {
     --bg: #F3F6FA; --bg-glow: rgba(91, 127, 166, 0.10);
     --elev: #FFFFFF; --elev-2: #F8FAFD; --soft: #EDF1F6; --tint: #EAF0F7; --tint-2: #F2F6FB;
-    --ink: #1A2230; --ink-2: #55606F; --ink-3: #939DAD; --ink-inv: #FFFFFF;
+    --ink: #1A2230; --ink-2: #55606F; --ink-3: #737A87; --ink-inv: #FFFFFF;
     --line: rgba(26, 34, 48, 0.07); --line-2: rgba(26, 34, 48, 0.13);
     --rose: #5B7FA6; --rose-2: #4A6E96; --rose-3: #7EA0C2; --rose-ink: #FFFFFF;
     --rose-tint: #E4ECF6; --rose-tint-2: #D5E2EF;
@@ -180,9 +180,9 @@
 :root[data-theme="sakura"] {
     --bg: #FDF6F7; --bg-glow: rgba(217, 122, 150, 0.10);
     --elev: #FFFFFF; --elev-2: #FEFAFC; --soft: #F8ECEF; --tint: #FBE9EE; --tint-2: #FDF3F6;
-    --ink: #33201F; --ink-2: #7C5C5A; --ink-3: #B1908E; --ink-inv: #FFFFFF;
+    --ink: #33201F; --ink-2: #7C5C5A; --ink-3: #917674; --ink-inv: #FFFFFF;
     --line: rgba(51, 32, 31, 0.07); --line-2: rgba(51, 32, 31, 0.12);
-    --rose: #D97A96; --rose-2: #C45F7E; --rose-3: #E89DB3; --rose-ink: #FFFFFF;
+    --rose: #AE6278; --rose-2: #C45F7E; --rose-3: #E89DB3; --rose-ink: #FFFFFF;
     --rose-tint: #FBE4EC; --rose-tint-2: #F6D3DF;
     --grad-rose: linear-gradient(135deg, #ECA6BA 0%, #D97A96 55%, #C25475 100%);
     --grad-rose-soft: linear-gradient(135deg, #FDF0F4 0%, #F8DDE6 100%);
@@ -201,9 +201,9 @@
 :root[data-theme="matcha"] {
     --bg: #F7F6EF; --bg-glow: rgba(107, 143, 113, 0.10);
     --elev: #FFFFFF; --elev-2: #FBFBF5; --soft: #EFF1E6; --tint: #EAF0E2; --tint-2: #F4F5EC;
-    --ink: #232A1E; --ink-2: #5E6853; --ink-3: #99A28E; --ink-inv: #FFFFFF;
+    --ink: #232A1E; --ink-2: #5E6853; --ink-3: #777E6F; --ink-inv: #FFFFFF;
     --line: rgba(35, 42, 30, 0.07); --line-2: rgba(35, 42, 30, 0.12);
-    --rose: #6B8F71; --rose-2: #587A5F; --rose-3: #8CAE92; --rose-ink: #FFFFFF;
+    --rose: #608166; --rose-2: #587A5F; --rose-3: #8CAE92; --rose-ink: #FFFFFF;
     --rose-tint: #E5EEE1; --rose-tint-2: #D6E4D1;
     --grad-rose: linear-gradient(135deg, #8FB095 0%, #6B8F71 55%, #53715B 100%);
     --grad-rose-soft: linear-gradient(135deg, #EFF4EA 0%, #DDE8D8 100%);
@@ -222,9 +222,9 @@
 :root[data-theme="caramel"] {
     --bg: #FBF5EE; --bg-glow: rgba(176, 122, 79, 0.10);
     --elev: #FFFFFF; --elev-2: #FDF9F3; --soft: #F2E9DE; --tint: #F4E7D7; --tint-2: #FAF3EA;
-    --ink: #2E231A; --ink-2: #6F5C4A; --ink-3: #A8917C; --ink-inv: #FFFFFF;
+    --ink: #2E231A; --ink-2: #6F5C4A; --ink-3: #8A7766; --ink-inv: #FFFFFF;
     --line: rgba(46, 35, 26, 0.07); --line-2: rgba(46, 35, 26, 0.13);
-    --rose: #B07A4F; --rose-2: #9C6B42; --rose-3: #C79A72; --rose-ink: #FFFFFF;
+    --rose: #9E6E47; --rose-2: #9C6B42; --rose-3: #C79A72; --rose-ink: #FFFFFF;
     --rose-tint: #F3E7D8; --rose-tint-2: #EAD8C2;
     --grad-rose: linear-gradient(135deg, #CB9F77 0%, #B07A4F 55%, #94603B 100%);
     --grad-rose-soft: linear-gradient(135deg, #F9F0E4 0%, #F0DFCB 100%);
@@ -243,7 +243,7 @@
 :root[data-theme="lavender"] {
     --bg: #F7F5FB; --bg-glow: rgba(138, 111, 176, 0.10);
     --elev: #FFFFFF; --elev-2: #FBF9FE; --soft: #EFECF6; --tint: #ECE7F6; --tint-2: #F6F3FB;
-    --ink: #241E33; --ink-2: #5F5672; --ink-3: #9B93AC; --ink-inv: #FFFFFF;
+    --ink: #241E33; --ink-2: #5F5672; --ink-3: #7F798D; --ink-inv: #FFFFFF;
     --line: rgba(36, 30, 51, 0.07); --line-2: rgba(36, 30, 51, 0.13);
     --rose: #8A6FB0; --rose-2: #775C9D; --rose-3: #A78FC8; --rose-ink: #FFFFFF;
     --rose-tint: #EBE4F4; --rose-tint-2: #DED2EC;
@@ -264,9 +264,9 @@
 :root[data-theme="ocean"] {
     --bg: #F2F8FA; --bg-glow: rgba(62, 140, 168, 0.10);
     --elev: #FFFFFF; --elev-2: #F7FBFD; --soft: #E9F2F5; --tint: #DFEFF4; --tint-2: #F0F7FA;
-    --ink: #1C2A30; --ink-2: #50646E; --ink-3: #8FA3AD; --ink-inv: #FFFFFF;
+    --ink: #1C2A30; --ink-2: #50646E; --ink-3: #707F87; --ink-inv: #FFFFFF;
     --line: rgba(28, 42, 48, 0.07); --line-2: rgba(28, 42, 48, 0.12);
-    --rose: #3E8CA8; --rose-2: #347995; --rose-3: #69A9C1; --rose-ink: #FFFFFF;
+    --rose: #39819B; --rose-2: #347995; --rose-3: #69A9C1; --rose-ink: #FFFFFF;
     --rose-tint: #DCEEF4; --rose-tint-2: #CBE3EB;
     --grad-rose: linear-gradient(135deg, #6FAEC4 0%, #3E8CA8 55%, #2F7189 100%);
     --grad-rose-soft: linear-gradient(135deg, #E9F4F8 0%, #D5E8EF 100%);
@@ -308,9 +308,9 @@
 :root[data-theme="ivory"] {
     --bg: #FDFCFA; --bg-glow: rgba(169, 138, 109, 0.08);
     --elev: #FFFFFF; --elev-2: #FBFAF7; --soft: #F3F1EC; --tint: #F2EDE4; --tint-2: #F8F6F1;
-    --ink: #2A241E; --ink-2: #6E645A; --ink-3: #A69C90; --ink-inv: #FFFFFF;
+    --ink: #2A241E; --ink-2: #6E645A; --ink-3: #857D73; --ink-inv: #FFFFFF;
     --line: rgba(42, 36, 30, 0.06); --line-2: rgba(42, 36, 30, 0.12);
-    --rose: #A98A6D; --rose-2: #97785C; --rose-3: #C3A88D; --rose-ink: #FFFFFF;
+    --rose: #91775E; --rose-2: #97785C; --rose-3: #C3A88D; --rose-ink: #FFFFFF;
     --rose-tint: #F2EBE2; --rose-tint-2: #E8DCCE;
     --grad-rose: linear-gradient(135deg, #C7AE94 0%, #A98A6D 55%, #8F7357 100%);
     --grad-rose-soft: linear-gradient(135deg, #F7F2EB 0%, #EDE3D5 100%);
@@ -462,7 +462,7 @@ img, video { max-width: 100%; display: block; }
 .lui-btn.sm { height: 34px; padding: 0 13px; font-size: var(--f-sub); border-radius: 10px; gap: 5px; }
 .lui-btn.xs { height: 28px; padding: 0 10px; font-size: var(--f-mini); border-radius: 8px; gap: 4px; }
 .lui-btn.lg { height: 50px; font-size: 16px; border-radius: var(--r-md); }
-.lui-btn.primary { background: var(--grad-rose); color: #fff; box-shadow: var(--sh-rose-sm); }
+.lui-btn.primary { background: var(--grad-rose); color: var(--rose-ink); box-shadow: var(--sh-rose-sm); }
 .lui-btn.primary:active { box-shadow: none; }
 .lui-btn.tonal { background: var(--rose-tint); color: var(--rose); }
 .lui-btn.ghost { background: var(--elev); border: 1px solid var(--line-2); color: var(--ink); box-shadow: var(--sh-xs); }
@@ -571,7 +571,7 @@ img, video { max-width: 100%; display: block; }
     white-space: nowrap;
     transition: all var(--t-fast) var(--ease);
 }
-.lui-chip.active { background: var(--rose); border-color: transparent; color: #fff; }
+.lui-chip.active { background: var(--rose); border-color: transparent; color: var(--rose-ink); }
 .lui-chip:active { transform: scale(0.95); }
 .lui-tag {
     display: inline-flex; align-items: center; gap: 4px;
