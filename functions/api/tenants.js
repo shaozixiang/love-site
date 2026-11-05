@@ -8,6 +8,7 @@
 //   resume  恢复租户
 //   reset   软重置：保留内容，清空 owner 回 awaiting_owner，旧管理员降级
 //   purge   硬重置：删除该租户全部数据 + 清图仓（需 body.confirm === true）
+//   delete  彻底删除：清空全部数据 + 图仓后删除 tenant 行（需 body.confirm === true）
 // ============================================================
 
 import {
@@ -61,6 +62,7 @@ export async function onRequest(context) {
       case 'resume': result = await resumeTenant(config, body); break;
       case 'reset': result = await softReset(config, body); break;
       case 'purge': result = await hardPurge(config, body, env); break;
+      case 'delete': result = await deleteTenant(config, body, env); break;
       default: return jsonResponse({ error: '未知操作：' + action }, 400, headers);
     }
     return jsonResponse(result, 200, headers);
@@ -166,9 +168,38 @@ async function softReset(config, body) {
   return { ok: true, tenant: rows && rows[0], note: '内容已保留，等待新管理员抢占' };
 }
 
-// ---------- 硬重置：删全部数据 + 清图仓 ----------
+// ---------- 硬重置：删全部数据 + 清图仓，tenant 行回到待接管 ----------
 async function hardPurge(config, body, env) {
   if (body.confirm !== true) throw httpError(400, '硬重置需显式确认：confirm=true');
+  const purged = await purgeTenantData(config, body, env);
+  const rows = await sb(config, `/tenants?id=eq.${purged.id}`, {
+    method: 'PATCH',
+    prefer: 'return=representation',
+    body: { owner_id: null, status: 'awaiting_owner', updated_at: new Date().toISOString() }
+  });
+  if (rows && rows[0]) invalidateTenantCache(rows[0]);
+  return {
+    ok: true, tenant: rows && rows[0], deleted: purged.deleted,
+    storagePurged: purged.storagePurged, storageError: purged.storageError,
+    note: purged.storageError ? '数据已清空，但图仓清理失败需人工核对' : '已完全清空并回到待接管状态'
+  };
+}
+
+// ---------- 彻底删除：清空数据 + 图仓后删除 tenant 行 ----------
+async function deleteTenant(config, body, env) {
+  if (body.confirm !== true) throw httpError(400, '删除站点需显式确认：confirm=true');
+  const purged = await purgeTenantData(config, body, env);
+  await sb(config, `/tenants?id=eq.${purged.id}`, { method: 'DELETE' });
+  invalidateTenantCache({ id: purged.id, slug: purged.slug });
+  return {
+    ok: true, id: purged.id, slug: purged.slug, deleted: purged.deleted,
+    storagePurged: purged.storagePurged, storageError: purged.storageError,
+    note: purged.storageError ? '站点已删除，但图仓清理失败需人工核对' : '站点及其全部数据、文件已彻底删除'
+  };
+}
+
+// 共用清理：校验 + 删 17 表 + 清图仓
+async function purgeTenantData(config, body, env) {
   const id = parseInt(body.id, 10);
   if (!id) throw httpError(400, '缺少租户 id');
   if (id === 1) throw httpError(400, '不能删除默认主站');
@@ -190,17 +221,7 @@ async function hardPurge(config, body, env) {
     storagePurged = await deleteTenantFiles(env, slug);
   } catch (e) { storageError = String(e.message || e); }
 
-  const rows = await sb(config, `/tenants?id=eq.${id}`, {
-    method: 'PATCH',
-    prefer: 'return=representation',
-    body: { owner_id: null, status: 'awaiting_owner', updated_at: new Date().toISOString() }
-  });
-  if (rows && rows[0]) invalidateTenantCache(rows[0]);
-  return {
-    ok: true, tenant: rows && rows[0], deleted,
-    storagePurged, storageError,
-    note: storageError ? '数据已清空，但图仓清理失败需人工核对' : '已完全清空并回到待接管状态'
-  };
+  return { id, slug, deleted, storagePurged, storageError };
 }
 
 // 通过 Git Data API 删除图仓 t/<slug>/ 下所有文件

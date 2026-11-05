@@ -3,7 +3,7 @@ import {
   checkAllowedOrigin, corsHeaders, jsonResponse,
   arrayBufferToHex, constantTimeEqual, randomHex
 } from '../_lib/session.js';
-import { resolveTenant } from '../_lib/tenant.js';
+import { resolveTenant, isPlatformAdmin } from '../_lib/tenant.js';
 
 const PASSWORD_MIN_LENGTH = 8;   // 注册/改密/重置最小长度（登录路径不做长度校验，保证老账号照常登录）
 // Cloudflare Workers 的 WebCrypto 基于 V8，PBKDF2 迭代上限 100000（超过即 NotSupportedError）
@@ -86,7 +86,7 @@ export async function onRequest(context) {
   const tenant = await resolveTenant(request, config);
 
   try {
-    const result = await handleAction(config, body || {}, request, tenant);
+    const result = await handleAction(config, body || {}, request, tenant, env);
     await accountLog(config, (body || {}).action || '', body || {}, result, request, null, tenant);
     return jsonResponse(result, 200, headers);
   } catch (error) {
@@ -169,7 +169,7 @@ async function accountLog(config, action, body, result, request, error, tenant) 
   } catch (e) {}
 }
 
-async function handleAction(config, body, request, tenant) {
+async function handleAction(config, body, request, tenant, env) {
   const action = String(body.action || '');
   if (action === 'login') {
     const key = `rate_login_${getClientIp(request)}_${cleanUsername(body.username)}`;
@@ -190,7 +190,11 @@ async function handleAction(config, body, request, tenant) {
   if (action === 'getTheme') return getTheme(config, tenant);
 
   const session = await requireSession(config, body.sessionToken, tenant);
-  if (action === 'me') return { user: await getPublicUser(config, session.username, tenant) };
+  if (action === 'me') {
+    const user = await getPublicUser(config, session.username, tenant);
+    user.platformAdmin = await isPlatformAdmin(env, session.username, tenant);
+    return { user };
+  }
   if (action === 'listUsers') return requireAdminThen(config, session.username, () => listUsers(config, tenant), tenant);
   if (action === 'createUser') return requireAdminThen(config, session.username, () => createUser(config, body, tenant), tenant);
   if (action === 'deleteUser') return requireAdminThen(config, session.username, () => deleteUser(config, body.username, tenant), tenant);
