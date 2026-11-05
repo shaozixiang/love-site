@@ -118,10 +118,25 @@ export async function onRequest(context) {
 
   try {
     let response;
-    if (isApi) {
-      response = await fetch(internalRequest);
-    } else {
-      response = await env.ASSETS.fetch(internalRequest);
+    let hop = 0;
+    let curRequest = internalRequest;
+    let curUrl = internalUrl;
+    for (;;) {
+      response = isApi ? await fetch(curRequest) : await env.ASSETS.fetch(curRequest);
+      const loc = response.headers.get('Location');
+      if (response.status >= 300 && response.status < 400 && loc && hop < 3) {
+        // 静态资源的规范化重定向（如 /index.html -> /）：在内部跟掉，
+        // 不能透传给浏览器，否则会跳出 /s/<slug>/ 命名空间
+        curUrl = new URL(loc, curUrl);
+        curRequest = new Request(curUrl.toString(), {
+          method: curRequest.method, headers: curRequest.headers,
+          body: (curRequest.method === 'GET' || curRequest.method === 'HEAD') ? undefined : curRequest.body,
+          redirect: 'manual'
+        });
+        hop++;
+        continue;
+      }
+      break;
     }
     if (isHtml && response.ok && (response.headers.get('Content-Type') || '').includes('text/html')) {
       response = rewriteHtml(response, tenant);
