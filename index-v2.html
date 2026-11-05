@@ -4,16 +4,16 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
     <title>我们的专属小站</title>
-    <meta name="version" content="20261027aw">
-<script>try{if(!location.search.match(/[?&]v=/)){location.replace(location.pathname+location.hash+'?v=20261027aw');}}catch(e){}</script>
+    <meta name="version" content="20261106aw">
+<script>try{if(!location.search.match(/[?&]v=/)){location.replace(location.pathname+location.hash+'?v=20261106aw');}}catch(e){}</script>
 
     <script>try{var t=localStorage.getItem('couple_theme')||'rose';if(t&&document.documentElement)document.documentElement.setAttribute('data-theme',t);}catch(e){}</script>
-    <link rel="stylesheet" href="assets/love-ui.css?v=20261027aw">
+    <link rel="stylesheet" href="assets/love-ui.css?v=20261106aw">
     <link rel="stylesheet" href="/lib/leaflet.css?v=20261011a">
     <script defer src="/lib/leaflet.js?v=20261011a"></script>
     <script defer src="/lib/supabase-v2.js?v=20261011a"></script>
-    <script defer src="/lib/app-v2.js?v=20261027aw"></script>
-    <script defer src="/lib/login-bg.js?v=20261027aw"></script>
+    <script defer src="/lib/app-v2.js?v=20261106aw"></script>
+    <script defer src="/lib/login-bg.js?v=20261106aw"></script>
 
     <style>
 /* ============================================================
@@ -203,14 +203,15 @@
         window.__gateUnlock = unlock;
         /* 门禁阶段预加载登录页背景媒体：点泡泡时就开始下载视频/照片，解锁后秒开 */
         try {
-            fetch('/api/login-bg', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'getConfig' }) })
+            var __tb = (window.__TENANT__ && window.__TENANT__.base) || '';
+            fetch(__tb + '/api/login-bg', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'getConfig' }) })
                 .then(function (r) { return r.json(); })
                 .then(function (cfg) {
                     if (!cfg || !cfg.enabled) return;
                     var cache = window.__lbgPreloaded = window.__lbgPreloaded || [];
                     (cfg.items || []).forEach(function (it) {
                         if (!it || !it.url) return;
-                        var u = it.url.indexOf('http') === 0 ? it.url : location.origin + it.url;
+                        var u = it.url.indexOf('http') === 0 ? it.url : location.origin + (__tb && it.url.charAt(0) === '/' && it.url.indexOf(__tb + '/') !== 0 ? __tb + it.url : it.url);
                         if (it.kind === 'video') {
                             var v = document.createElement('video');
                             v.preload = 'auto'; v.muted = true; v.playsInline = true;

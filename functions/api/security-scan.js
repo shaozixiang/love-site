@@ -10,6 +10,7 @@ import { runSecurityChecks } from '../../scripts/security-checks.mjs';
 import {
   requireSession, checkAdmin, checkAllowedOrigin, corsHeaders, jsonResponse, readCookie
 } from '../_lib/session.js';
+import { resolveTenant } from '../_lib/tenant.js';
 
 export async function onRequest(context) {
   const { request, env } = context;
@@ -21,14 +22,18 @@ export async function onRequest(context) {
 
   const cfg = getConfig(env);
   if (!cfg.ok) return jsonResponse({ error: cfg.error }, 500, headers);
+  const tenant = await resolveTenant(request, cfg);
 
-  // 管理员会话校验（与 /api/account、/api/db 同一套 HMAC 会话）
+  // 管理员会话校验（绑定租户）
   const token = request.headers.get('X-Couple-Token') || readCookie(request.headers.get('Cookie') || '', 'couple_t');
   let session;
-  try { session = await requireSession(cfg, token); }
+  try { session = await requireSession(cfg, token, tenant); }
   catch (e) { return jsonResponse({ error: '未登录或登录已失效，请重新登录' }, 401, headers); }
-  const isAdmin = await checkAdmin(cfg, session.username);
-  if (!isAdmin) return jsonResponse({ error: '无权限：只有管理员可以查看/触发安全扫描' }, 403, headers);
+  const isAdmin = await checkAdmin(cfg, session.username, tenant);
+  // 平台级安全扫描覆盖全局仓库/配置，仅默认租户（平台超管）可执行
+  if (!isAdmin || Number(tenant.id) !== 1) {
+    return jsonResponse({ error: '无权限：安全扫描仅平台管理员可查看/触发' }, 403, headers);
+  }
 
   if (request.method === 'GET') {
     return jsonResponse(await readLatest(cfg), 200, headers);
@@ -72,7 +77,7 @@ export async function onRequest(context) {
     await fetch(`${cfg.supabaseUrl}/rest/v1/site_config`, {
       method: 'POST',
       headers: sbHeaders(cfg, { Prefer: 'resolution=merge-duplicates' }),
-      body: JSON.stringify({ key: 'last_security_report', value: JSON.stringify(report) })
+      body: JSON.stringify({ tenant_id: tenant.id, key: 'last_security_report', value: JSON.stringify(report) })
     });
   } catch (e) { /* 落库失败仍返回本次报告 */ }
 

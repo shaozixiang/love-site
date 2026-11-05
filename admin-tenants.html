@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="rose">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>小站管理 · 平台超管</title>
+<link rel="stylesheet" href="assets/love-ui.css?v=20261027aw">
+<style>
+  body{margin:0;padding:20px 16px 40px;background:var(--lui-bg,#faf7f8);color:var(--lui-text,#3a3338);
+       font-family:system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;}
+  .wrap{max-width:760px;margin:0 auto}
+  .hd{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:18px;flex-wrap:wrap}
+  .hd h1{font-size:20px;margin:0;letter-spacing:.5px}
+  .hd .sub{font-size:12px;opacity:.6;margin-top:4px}
+  .card{background:#fff;border-radius:16px;padding:16px;margin-bottom:14px;
+        box-shadow:0 2px 14px rgba(140,110,125,.08);border:1px solid rgba(180,150,165,.12)}
+  .card h2{font-size:15px;margin:0 0 12px;font-weight:600}
+  .row{display:flex;flex-direction:column;gap:6px;margin-bottom:10px}
+  label{font-size:12px;opacity:.7}
+  input[type=text]{width:100%;box-sizing:border-box;padding:11px 13px;border-radius:11px;font-size:14px;
+    border:1px solid rgba(180,150,165,.28);background:#fff;outline:none;color:inherit}
+  input:focus{border-color:#d98ca6;box-shadow:0 0 0 3px rgba(217,140,166,.13)}
+  .slugline{display:flex;align-items:center;gap:6px;font-size:12px;opacity:.65;margin-top:2px;word-break:break-all}
+  .btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;min-height:44px;padding:0 18px;
+    border-radius:12px;border:none;font-size:14px;font-weight:600;cursor:pointer;transition:.16s;}
+  .btn-main{background:#d98ca6;color:#fff;width:100%}
+  .btn-main:disabled{opacity:.55;cursor:not-allowed}
+  .btn-mini{min-height:34px;padding:0 12px;font-size:12px;font-weight:500;border-radius:9px;
+    background:rgba(217,140,166,.12);color:#b26987;border:1px solid rgba(217,140,166,.24)}
+  .btn-warn{background:rgba(230,150,90,.13);color:#a8622a;border-color:rgba(230,150,90,.26)}
+  .btn-danger{background:rgba(214,90,90,.11);color:#b14242;border-color:rgba(214,90,90,.24)}
+  .tlist{display:flex;flex-direction:column;gap:10px}
+  .titem{border:1px solid rgba(180,150,165,.16);border-radius:13px;padding:12px 13px;background:rgba(250,247,248,.7)}
+  .titem .top{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap}
+  .titem .nm{font-weight:600;font-size:14px}
+  .badge{font-size:11px;padding:3px 9px;border-radius:20px;white-space:nowrap}
+  .b-active{background:rgba(92,170,120,.14);color:#3f7d54}
+  .b-await{background:rgba(230,180,60,.16);color:#8a6a15}
+  .b-susp{background:rgba(214,90,90,.12);color:#a33f3f}
+  .titem .url{font-size:12px;opacity:.65;margin-top:6px;word-break:break-all;user-select:all}
+  .titem .meta{font-size:11.5px;opacity:.5;margin-top:5px}
+  .acts{display:flex;gap:8px;margin-top:10px;flex-wrap:wrap}
+  .empty{text-align:center;padding:26px 10px;font-size:13px;opacity:.55}
+  .msg{margin-top:10px;font-size:12.5px;padding:9px 12px;border-radius:10px;display:none;line-height:1.5}
+  .msg.ok{display:block;background:rgba(92,170,120,.12);color:#3f7d54}
+  .msg.err{display:block;background:rgba(214,90,90,.1);color:#a33f3f}
+  .gate{text-align:center;padding:46px 16px;font-size:14px;opacity:.75}
+  .hint{font-size:11.5px;line-height:1.65;opacity:.62;margin-top:10px}
+  .spin{display:inline-block;width:14px;height:14px;border:2px solid rgba(255,255,255,.5);
+        border-top-color:#fff;border-radius:50%;animation:sp .7s linear infinite;vertical-align:-2px}
+  @keyframes sp{to{transform:rotate(360deg)}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="hd">
+    <div>
+      <h1>小站管理</h1>
+      <div class="sub">平台超管专用 · 为朋友开通独立小站</div>
+    </div>
+    <div id="who" class="sub"></div>
+  </div>
+
+  <div id="gate" class="gate" style="display:none">请先以平台超管身份登录主站，再回到本页。</div>
+
+  <div id="main" style="display:none">
+    <div class="card">
+      <h2>开通新小站</h2>
+      <div class="row">
+        <label for="slug">网址标识（英文小写、数字、连字符）</label>
+        <input id="slug" type="text" placeholder="例如 xiaoming" maxlength="32" autocomplete="off" autocapitalize="off" spellcheck="false">
+        <div class="slugline">开通后网址：<span id="preview">/s/____/</span></div>
+      </div>
+      <div class="row">
+        <label for="name">小站名称（对方看到的名字）</label>
+        <input id="name" type="text" placeholder="例如 小明和小红" maxlength="40">
+      </div>
+      <button id="createBtn" class="btn btn-main">开通</button>
+      <div id="createMsg" class="msg"></div>
+      <div class="hint">新站是空白站：功能与主站完全一致，无任何内容，默认 rose 主题。对方打开网址后，<b>第一个注册成功的用户自动成为该站管理员</b>。</div>
+    </div>
+
+    <div class="card">
+      <h2>全部小站</h2>
+      <div id="list" class="tlist"><div class="empty">加载中…</div></div>
+    </div>
+  </div>
+</div>
+
+<script>
+(function () {
+  var API = '/api/tenants';
+  var $ = function (id) { return document.getElementById(id); };
+  var token = localStorage.getItem('couple_session_token') || '';
+
+  function msg(el, text, ok) {
+    el.className = 'msg ' + (ok ? 'ok' : 'err');
+    el.textContent = text;
+    if (ok) setTimeout(function () { el.className = 'msg'; }, 4000);
+  }
+
+  function post(body) {
+    return fetch(API, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Couple-Token': token },
+      body: JSON.stringify(body)
+    }).then(function (r) {
+      return r.json().then(function (j) {
+        if (!r.ok) throw new Error((j && j.error) || ('HTTP ' + r.status));
+        return j;
+      });
+    });
+  }
+
+  function fullUrl(slug) { return location.origin + '/s/' + slug + '/'; }
+
+  function statusBadge(s) {
+    if (s === 'active') return '<span class="badge b-active">运行中</span>';
+    if (s === 'awaiting_owner') return '<span class="badge b-await">等待首位注册</span>';
+    return '<span class="badge b-susp">已停用</span>';
+  }
+
+  function esc(s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+    });
+  }
+
+  function render(list) {
+    var box = $('list');
+    if (!list || !list.length) { box.innerHTML = '<div class="empty">还没有开通任何小站</div>'; return; }
+    box.innerHTML = list.map(function (t) {
+      var id = t.id, slug = esc(t.slug), st = t.status;
+      var acts = [];
+      if (id !== 1) {
+        if (st === 'suspended') acts.push('<button class="btn btn-mini" data-act="resume" data-id="' + id + '">恢复</button>');
+        else acts.push('<button class="btn btn-mini btn-warn" data-act="suspend" data-id="' + id + '">停用</button>');
+        acts.push('<button class="btn btn-mini btn-warn" data-act="reset" data-id="' + id + '">软重置</button>');
+        acts.push('<button class="btn btn-mini btn-danger" data-act="purge" data-id="' + id + '">清空重建</button>');
+      } else {
+        acts.push('<span class="badge b-active">主站</span>');
+      }
+      return '<div class="titem">'
+        + '<div class="top"><span class="nm">' + esc(t.name || slug) + '</span>' + statusBadge(st) + '</div>'
+        + '<div class="url">' + fullUrl(t.slug) + '</div>'
+        + '<div class="meta">ID ' + id + ' · 管理员 ' + (t.owner_id ? esc(t.owner_id) : '（待首位注册者接管）') + '</div>'
+        + '<div class="acts">' + acts.join('') + '</div>'
+        + '</div>';
+    }).join('');
+  }
+
+  function load() {
+    post({ action: 'list' }).then(function (r) {
+      render(r.tenants);
+    }).catch(function (e) {
+      $('list').innerHTML = '<div class="empty">' + esc(e.message) + '</div>';
+    });
+  }
+
+  function doAction(act, id) {
+    var body = { action: act, id: id };
+    if (act === 'purge') {
+      if (!confirm('清空重建会删除该小站的全部内容与图片，且不可恢复。确认继续？')) return;
+      body.confirm = true;
+    }
+    if (act === 'reset' && !confirm('软重置会让该站当前管理员失去权限，内容保留，等待下一位注册者接管。确认？')) return;
+    if (act === 'suspend' && !confirm('停用后该站访客会看到“已停用”页面。确认？')) return;
+    post(body).then(function () {
+      load();
+    }).catch(function (e) { alert(e.message); });
+  }
+
+  $('list').addEventListener('click', function (ev) {
+    var b = ev.target.closest ? ev.target.closest('button[data-act]') : null;
+    if (!b) return;
+    doAction(b.getAttribute('data-act'), parseInt(b.getAttribute('data-id'), 10));
+  });
+
+  $('slug').addEventListener('input', function () {
+    var v = this.value.trim().toLowerCase().replace(/[^a-z0-9-]/g, '');
+    this.value = v;
+    $('preview').textContent = '/s/' + (v || '____') + '/';
+  });
+
+  $('createBtn').addEventListener('click', function () {
+    var slug = $('slug').value.trim().toLowerCase();
+    var name = $('name').value.trim();
+    if (!slug) return msg($('createMsg'), '请填写网址标识', false);
+    if (slug.length < 3) return msg($('createMsg'), '标识至少 3 个字符', false);
+    if (!name) return msg($('createMsg'), '请填写小站名称', false);
+    var btn = this;
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spin"></span> 开通中';
+    post({ action: 'create', slug: slug, name: name }).then(function (r) {
+      msg($('createMsg'), '已开通：' + fullUrl(r.tenant.slug), true);
+      $('slug').value = ''; $('name').value = ''; $('preview').textContent = '/s/____/';
+      load();
+    }).catch(function (e) {
+      msg($('createMsg'), e.message, false);
+    }).then(function () {
+      btn.disabled = false;
+      btn.textContent = '开通';
+    });
+  });
+
+  // 身份校验：必须是主站（非 /s/ 子路径）+ 平台超管
+  post({ action: 'list' }).then(function (r) {
+    $('main').style.display = '';
+    $('who').textContent = '已登录：' + (localStorage.getItem('couple_logged_user') || '');
+    render(r.tenants);
+  }).catch(function (e) {
+    $('gate').style.display = '';
+  });
+})();
+</script>
+</body>
+</html>

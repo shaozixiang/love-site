@@ -11,6 +11,7 @@
 import {
   requireSession, checkAdmin, checkAllowedOrigin, corsHeaders, jsonResponse, readCookie
 } from '../_lib/session.js';
+import { resolveTenant } from '../_lib/tenant.js';
 
 const COUNTS_TABLES = [
   ['feeds', 'feeds'], ['messages', 'messages'], ['loves', 'loves'],
@@ -32,14 +33,18 @@ export async function onRequest(context) {
 
   const cfg = getConfig(env);
   if (!cfg.ok) return jsonResponse({ error: cfg.error }, 500, headers);
+  const tenant = await resolveTenant(request, cfg);
 
-  // 管理员会话校验
+  // 管理员会话校验（绑定租户）
   const token = request.headers.get('X-Couple-Token') || readCookie(request.headers.get('Cookie') || '', 'couple_t');
   let session;
-  try { session = await requireSession(cfg, token); }
+  try { session = await requireSession(cfg, token, tenant); }
   catch (e) { return jsonResponse({ error: '未登录或登录已失效，请重新登录' }, 401, headers); }
-  const isAdmin = await checkAdmin(cfg, session.username);
-  if (!isAdmin) return jsonResponse({ error: '无权限：只有管理员可以查看监控面板' }, 403, headers);
+  const isAdmin = await checkAdmin(cfg, session.username, tenant);
+  // 平台级监控含全局仓库/数据库信息，仅默认租户（平台超管）可访问
+  if (!isAdmin || Number(tenant.id) !== 1) {
+    return jsonResponse({ error: '无权限：监控面板仅平台管理员可查看' }, 403, headers);
+  }
 
   const siteUrl = new URL(request.url).origin;
 

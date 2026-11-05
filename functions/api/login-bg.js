@@ -9,6 +9,7 @@ import {
   getConfig as getBaseConfig, requireSession, checkAdmin,
   checkAllowedOrigin, corsHeaders, jsonResponse
 } from '../_lib/session.js';
+import { resolveTenant } from '../_lib/tenant.js';
 
 const VALID_MODES = new Set(['photos', 'video', 'mixed']);
 const VALID_ORDERS = new Set(['sequence', 'random']);
@@ -39,9 +40,9 @@ async function supabase(config, path, options) {
   return data;
 }
 
-async function serverLog(config, action, username, details) {
+async function serverLog(config, action, username, details, tenantId) {
   try {
-    const row = { action, user: username || 'guest', details: JSON.stringify(details || {}), created_at: new Date().toISOString() };
+    const row = { action, user: username || 'guest', tenant_id: Number(tenantId) || 1, details: JSON.stringify(details || {}), created_at: new Date().toISOString() };
     await fetch(`${config.supabaseUrl}/rest/v1/admin_logs`, {
       method: 'POST',
       headers: { apikey: config.serviceKey, Authorization: `Bearer ${config.serviceKey}`, 'Content-Type': 'application/json' },
@@ -50,9 +51,9 @@ async function serverLog(config, action, username, details) {
   } catch (e) {}
 }
 
-async function fetchConfigRow(config) {
+async function fetchConfigRow(config, tenant) {
   try {
-    const rows = await supabase(config, '/login_bg_config?select=*&limit=1', { method: 'GET' });
+    const rows = await supabase(config, `/login_bg_config?select=*&tenant_id=eq.${tenant.id}&limit=1`, { method: 'GET' });
     return rows && rows[0] ? rows[0] : null;
   } catch (e) {
     if (e && (e.status === 404 || e.status === 400 || e.status === 428)) {
@@ -62,9 +63,9 @@ async function fetchConfigRow(config) {
   }
 }
 
-async function fetchMedia(config) {
+async function fetchMedia(config, tenant) {
   try {
-    const rows = await supabase(config, '/login_bg_media?select=id,kind,url,dynamic,sort_order&order=sort_order.asc,id.asc&limit=200', { method: 'GET' });
+    const rows = await supabase(config, `/login_bg_media?select=id,kind,url,dynamic,sort_order&tenant_id=eq.${tenant.id}&order=sort_order.asc,id.asc&limit=200`, { method: 'GET' });
     return Array.isArray(rows) ? rows : [];
   } catch (e) {
     if (e && (e.status === 404 || e.status === 400 || e.status === 428)) {
@@ -74,8 +75,8 @@ async function fetchMedia(config) {
   }
 }
 
-async function authorizedUsernames(config) {
-  const row = await fetchConfigRow(config);
+async function authorizedUsernames(config, tenant) {
+  const row = await fetchConfigRow(config, tenant);
   return Array.isArray(row && row.authorized_users) ? row.authorized_users : [];
 }
 
@@ -124,6 +125,7 @@ export async function onRequest(context) {
 
   const config = getBaseConfig(env);
   if (!config.ok) return jsonResponse({ error: config.error }, 500, headers);
+  const tenant = await resolveTenant(request, config);
 
   let body = null;
   try { body = await request.json(); } catch (e) { return jsonResponse({ error: '请求体不是合法 JSON。' }, 400, headers); }
@@ -141,7 +143,7 @@ export async function onRequest(context) {
         href: String(td.href || '').slice(0, 200),
         v: String(td.v || '').slice(0, 30),
         extra: JSON.stringify(td).slice(0, 500)
-      });
+      }, tenant.id);
       return jsonResponse({ ok: true }, 200, headers);
     }
     if (action === 'getConfig') {
@@ -149,10 +151,10 @@ export async function onRequest(context) {
       let session = null;
       const token = body.sessionToken || '';
       if (token) {
-        try { session = await requireSession(config, token); } catch (e) { session = null; }
+        try { session = await requireSession(config, token, tenant); } catch (e) { session = null; }
       }
-      const row = await fetchConfigRow(config);
-      const items = await fetchMedia(config);
+      const row = await fetchConfigRow(config, tenant) || {};
+      const items = await fetchMedia(config, tenant);
       const out = {
         enabled: !!row.enabled,
         mode: row.mode || 'photos',
@@ -169,8 +171,8 @@ export async function onRequest(context) {
       };
       if (session) {
         const username = session.username;
-        const isAdmin = await checkAdmin(config, username);
-        const authUsers = await authorizedUsernames(config).catch(() => []);
+        const isAdmin = await checkAdmin(config, username, tenant);
+        const authUsers = await authorizedUsernames(config, tenant).catch(() => []);
         out.canEdit = isAdmin || authUsers.indexOf(username) !== -1;
         if (out.canEdit) {
           out.isAdmin = isAdmin;
@@ -183,16 +185,16 @@ export async function onRequest(context) {
     if (action === 'saveConfig') {
       const token = body.sessionToken || '';
       let session;
-      try { session = await requireSession(config, token); }
+      try { session = await requireSession(config, token, tenant); }
       catch (e) { return jsonResponse({ error: '登录已失效，请重新登录。' }, 401, headers); }
       const username = session.username;
-      const isAdmin = await checkAdmin(config, username);
-      const authUsers = await authorizedUsernames(config);
+      const isAdmin = await checkAdmin(config, username, tenant);
+      const authUsers = await authorizedUsernames(config, tenant);
       if (!isAdmin && authUsers.indexOf(username) === -1) {
         return jsonResponse({ error: '无权限：仅管理员或被授权的用户可设置登录页背景。' }, 403, headers);
       }
 
-      const row = await fetchConfigRow(config);
+      const row = await fetchConfigRow(config, tenant) || {};
       const curEnabled = !!row.enabled;
       const curAuth = Array.isArray(row.authorized_users) ? row.authorized_users : [];
 
@@ -237,11 +239,11 @@ export async function onRequest(context) {
         extra.loop_count = Number.isFinite(lc) ? Math.min(9, Math.max(0, lc)) : 0;
       } catch (e) { /* 列尚未添加：跳过 */ }
 
-      // 保存配置（幂等 upsert id=1）
+      // 保存配置（按 tenant_id 幂等 upsert，每租户一行）
       await supabase(config, '/login_bg_config', {
         method: 'POST',
         body: {
-          id: 1, enabled, mode, order_mode, template,
+          tenant_id: tenant.id, enabled, mode, order_mode, template,
           music_enabled, video_sound, music_url, music_name, photo_duration,
           authorized_users: authorized, updated_by: username, updated_at: new Date().toISOString(),
           ...extra
@@ -249,16 +251,16 @@ export async function onRequest(context) {
         prefer: 'resolution=merge-duplicates'
       });
 
-      // 媒体全量替换（确认保存语义）
-      await supabase(config, '/login_bg_media?id=neq.0', { method: 'DELETE' });
+      // 媒体全量替换（仅本租户，确认保存语义）
+      await supabase(config, `/login_bg_media?tenant_id=eq.${tenant.id}`, { method: 'DELETE' });
       for (const it of items) {
         await supabase(config, '/login_bg_media', {
           method: 'POST',
-          body: { kind: it.kind, url: it.url, dynamic: it.dynamic, sort_order: it.sort_order }
+          body: { tenant_id: tenant.id, kind: it.kind, url: it.url, dynamic: it.dynamic, sort_order: it.sort_order }
         });
       }
 
-      await serverLog(config, '登录页背景更新', username, { mode, template, items: items.length, enabled, authorized: authorized.length });
+      await serverLog(config, '登录页背景更新', username, { mode, template, items: items.length, enabled, authorized: authorized.length }, tenant.id);
       return jsonResponse({ ok: true, saved: { enabled, mode, template, items: items.length } }, 200, headers);
     }
 

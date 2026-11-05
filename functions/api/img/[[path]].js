@@ -44,14 +44,47 @@ export async function onRequest(context) {
       return jsonResponse({ error: '非法文件路径' }, 403);
     }
     const rel = '/' + segs.join('/');
-    if (!ALLOWED_PREFIXES.some(p => rel.startsWith(p))) {
+
+    // ---- 租户归属解析 ----
+    // 当前访问租户（路由层注入，可信；根站为空）
+    const tenantSlug = String(request.headers.get('X-Tenant-Slug') || '').trim();
+    const tenantIdHdr = String(request.headers.get('X-Tenant-Id') || '').trim();
+    const currentTenant = tenantIdHdr ? { id: Number(tenantIdHdr), slug: tenantSlug } : null;
+
+    // 对象所属租户：/t/<slug>/... 取第二段；无 /t/ 前缀为根站资源
+    let objectSlug = '';
+    let subRel = rel;
+    if (rel.startsWith('/t/')) {
+      const m = rel.match(/^\/t\/([a-z0-9][a-z0-9-]{1,30}[a-z0-9])(\/.*)?$/);
+      if (!m) return jsonResponse({ error: '非法租户路径' }, 403);
+      objectSlug = m[1];
+      subRel = m[2] || '/';
+    }
+    // 子路径必须命中标准前缀白名单（租户与根站共用同一套前缀规则）
+    if (!ALLOWED_PREFIXES.some(p => subRel.startsWith(p))) {
       return jsonResponse({ error: '该路径不允许访问' }, 403);
     }
+    // 归属一致性：租户对象只能由该租户访问；根站资源只允许根站访问
+    if (objectSlug) {
+      if (objectSlug !== tenantSlug) return jsonResponse({ error: '无权访问该资源' }, 403);
+    } else if (tenantSlug) {
+      return jsonResponse({ error: '无权访问根站资源' }, 403);
+    }
 
-    // 1. 会话校验：cookie 优先，header 兜底（loginbg 登录页背景对未登录访客可见，豁免）
-    if (!PUBLIC_PREFIXES.some(p => rel.startsWith(p))) {
+    // 登录页背景（loginbg）对未登录访客可见，豁免会话；根站与租户分别判定
+    const isPublic = objectSlug
+      ? subRel.startsWith('/loginbg/')
+      : rel.startsWith('/loginbg/');
+
+    // 1. 会话校验：cookie 优先，header 兜底
+    if (!isPublic) {
       const token = readCookie(request.headers.get('Cookie') || '', 'couple_t') || request.headers.get('X-Couple-Token') || '';
-      try { await requireSession({ sessionSecret: env.AUTH_SESSION_SECRET || env.SUPABASE_SERVICE_ROLE_KEY || env.SUPABASE_SERVICE_KEY, supabaseUrl: String(env.SUPABASE_URL || '').replace(/\/$/, ''), serviceKey: env.SUPABASE_SERVICE_ROLE_KEY || env.SUPABASE_SERVICE_KEY }, token); }
+      try {
+        await requireSession(
+          { sessionSecret: env.AUTH_SESSION_SECRET || env.SUPABASE_SERVICE_ROLE_KEY || env.SUPABASE_SERVICE_KEY, supabaseUrl: String(env.SUPABASE_URL || '').replace(/\/$/, ''), serviceKey: env.SUPABASE_SERVICE_ROLE_KEY || env.SUPABASE_SERVICE_KEY },
+          token, currentTenant
+        );
+      }
       catch (e) { return jsonResponse({ error: '未登录或登录已失效' }, 401); }
     }
 

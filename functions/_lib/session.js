@@ -63,24 +63,29 @@ export function randomHex(bytes) {
 }
 
 // ---------- 会话 ----------
-export async function signSession(config, username) {
+export async function signSession(config, username, tenantId = 1) {
   const now = Math.floor(Date.now() / 1000);
-  const payload = { u: username, iat: now, exp: now + SESSION_TTL_SECONDS, n: randomHex(8) };
+  const payload = {
+    u: username, t: Number(tenantId) || 1,
+    iat: now, exp: now + SESSION_TTL_SECONDS, n: randomHex(8)
+  };
   const encoded = base64UrlEncode(JSON.stringify(payload));
   return `${encoded}.${await hmacHex(config.sessionSecret, encoded)}`;
 }
 
 // 账号是否仍存在（防幽灵令牌：删号后旧 token 立即失效）
-export async function isUserAlive(config, username) {
+export async function isUserAlive(config, username, tenantId = null) {
   try {
-    const resp = await fetch(`${config.supabaseUrl}/rest/v1/users?select=username&username=eq.${encodeURIComponent(username)}&limit=1`, { headers: authHeaders(config) });
+    let q = `select=username&username=eq.${encodeURIComponent(username)}&limit=1`;
+    if (tenantId !== null) q += `&tenant_id=eq.${Number(tenantId)}`;
+    const resp = await fetch(`${config.supabaseUrl}/rest/v1/users?${q}`, { headers: authHeaders(config) });
     const rows = await resp.json().catch(() => null);
     return Array.isArray(rows) && rows.length > 0 && rows[0].username === username;
   } catch (e) { return false; }
 }
 
 // 验签 + 过期 + 存活；失败抛 Error('登录已失效')
-export async function requireSession(config, token) {
+export async function requireSession(config, token, tenant = null) {
   const value = String(token || '');
   const parts = value.split('.');
   if (parts.length !== 2) throw new Error('登录已失效');
@@ -89,14 +94,19 @@ export async function requireSession(config, token) {
   let payload;
   try { payload = JSON.parse(base64UrlDecode(parts[0])); } catch (_) { throw new Error('登录已失效'); }
   if (!payload.u || payload.exp < Math.floor(Date.now() / 1000)) throw new Error('登录已失效');
-  if (!await isUserAlive(config, payload.u)) throw new Error('登录已失效');
-  return { username: payload.u };
+
+  const tokenTenant = payload.t ? Number(payload.t) : 1;
+  if (tenant !== null && tokenTenant !== Number(tenant.id)) throw new Error('登录已失效');
+  if (!await isUserAlive(config, payload.u, tokenTenant)) throw new Error('登录已失效');
+  return { username: payload.u, tenantId: tokenTenant };
 }
 
 // ---------- 角色 ----------
-export async function checkAdmin(config, username) {
+export async function checkAdmin(config, username, tenant = null) {
   try {
-    const resp = await fetch(`${config.supabaseUrl}/rest/v1/users?select=role&username=eq.${encodeURIComponent(username)}&limit=1`, { headers: authHeaders(config) });
+    let q = `select=role&username=eq.${encodeURIComponent(username)}&limit=1`;
+    if (tenant !== null) q += `&tenant_id=eq.${Number(tenant.id)}`;
+    const resp = await fetch(`${config.supabaseUrl}/rest/v1/users?${q}`, { headers: authHeaders(config) });
     const rows = await resp.json().catch(() => null);
     return Array.isArray(rows) && rows.length > 0 && (rows[0].role === 'admin' || String(username).toLowerCase() === 'admin');
   } catch (e) { return false; }

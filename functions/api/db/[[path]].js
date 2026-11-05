@@ -18,6 +18,7 @@ import {
   getConfig, requireSession, checkAdmin,
   checkAllowedOrigin, corsHeaders, jsonResponse, authHeaders
 } from '../../_lib/session.js';
+import { resolveTenant } from '../../_lib/tenant.js';
 
 const ALLOWED_TABLES = new Set([
   'feeds', 'messages', 'loves', 'memories', 'memos', 'schedules', 'countdowns',
@@ -41,9 +42,10 @@ const VISIBILITY_TABLES = new Set([
 const DEFAULT_COUPLE_USERNAMES = new Set(['boy', 'girl']);
 
 // 动态读取情侣账号名单：解决“情侣改名后判断失效”与“实际账号非 boy/girl 时仅情侣可见失效”
-async function getCoupleUsernames(config) {
+async function getCoupleUsernames(config, tenant) {
   try {
-    const r = await fetch(`${config.supabaseUrl}/rest/v1/site_config?key=eq.couple_usernames&select=value&limit=1`, { headers: authHeaders(config) });
+    const tid = Number(tenant ? tenant.id : 1);
+    const r = await fetch(`${config.supabaseUrl}/rest/v1/site_config?key=eq.couple_usernames&tenant_id=eq.${tid}&select=value&limit=1`, { headers: authHeaders(config) });
     if (!r.ok) return DEFAULT_COUPLE_USERNAMES;
     const rows = await r.json();
     const raw = (rows && rows[0] && rows[0].value) ? rows[0].value : '';
@@ -85,10 +87,13 @@ export async function onRequest(context) {
     const config = getConfig(env);
     if (!config.ok) return jsonResponse({ error: config.error }, 500);
 
-    // 1. 会话校验：没有有效登录会话（含账号已删除），一律拒绝
+    // 解析当前租户（根站=默认租户 1）
+    const tenant = await resolveTenant(request, config);
+
+    // 1. 会话校验：没有有效登录会话（含账号已删除、租户不匹配），一律拒绝
     const token = request.headers.get('X-Couple-Token') || '';
     let session;
-    try { session = await requireSession(config, token); }
+    try { session = await requireSession(config, token, tenant); }
     catch (e) { return jsonResponse({ error: '未登录或登录已失效，请重新登录' }, 401); }
 
     // 2. 表白名单
@@ -101,9 +106,9 @@ export async function onRequest(context) {
     const method = request.method;
     let body = (method === 'GET' || method === 'HEAD') ? undefined : await request.text();
 
-    // 角色只判定一次（管理员/情侣账号）
-    const isAdmin = await checkAdmin(config, session.username);
-    const isCouple = (await getCoupleUsernames(config)).has(session.username);
+    // 角色只判定一次（管理员/情侣账号），均限定当前租户
+    const isAdmin = await checkAdmin(config, session.username, tenant);
+    const isCouple = (await getCoupleUsernames(config, tenant)).has(session.username);
 
     // 读操作：操作日志仅管理员可查看（M1/S2）
     if ((method === 'GET' || method === 'HEAD') && table === 'admin_logs') {
@@ -114,14 +119,18 @@ export async function onRequest(context) {
 
     // 2.5 写操作权限校验：只能删/改自己的内容（admin 例外），评论点赞交互走服务端原子化
     try {
-      const writeResult = await enforceWritePolicy(config, session, method, table, url.search, body);
+      const writeResult = await enforceWritePolicy(config, session, method, table, url.search, body, tenant);
       if (writeResult && writeResult.replacementBody !== undefined) body = JSON.stringify(writeResult.replacementBody);
     } catch (e) { return jsonResponse({ error: e.message || '无权操作' }, 403); }
 
     // 3. 用 service role 转发到真实 Supabase（service role 绕过 RLS）
     // 读取请求在服务端强制注入行级条件（S2）：无论前端 select 哪些列、带什么参数，
-    // 软删除/可见性/私密规则都在数据库层生效，无法靠精简 select 绕过
-    const safeSearch = buildSafeSearch(url, table, method, session.username, isAdmin, isCouple);
+    // 软删除/可见性/私密规则与租户隔离都在数据库层生效，无法靠精简 select 绕过
+    const safeSearch = buildSafeSearch(url, table, method, session.username, isAdmin, isCouple, tenant);
+    // 写操作：强制 tenant_id 为当前租户，剥离客户端伪造的归属
+    if (method !== 'GET' && method !== 'HEAD') {
+      body = enforceTenantOnBody(body, tenant.id);
+    }
     const upstream = `${config.supabaseUrl}/rest/v1/${table}${safeSearch}`;
     const headers = {
       apikey: config.serviceKey,
@@ -146,6 +155,7 @@ export async function onRequest(context) {
         const row = {
           action: describeDbAction(method, table, body),
           user: session.username || 'guest',
+          tenant_id: tenant.id,
           details: JSON.stringify({
             table, method,
             target: idMatch ? decodeURIComponent(idMatch[1]) : '',
@@ -165,7 +175,7 @@ export async function onRequest(context) {
 }
 
 // 返回 null 表示原样转发；返回 {replacementBody} 表示用服务端重写后的请求体转发
-async function enforceWritePolicy(config, session, method, table, search, bodyText) {
+async function enforceWritePolicy(config, session, method, table, search, bodyText, tenant) {
   if (method === 'GET' || method === 'HEAD') return null;
 
   // users 表：任何写操作一律拒绝（S1 提权）。账号创建/改密/改角色只能走 /api/account 专用接口
@@ -176,7 +186,7 @@ async function enforceWritePolicy(config, session, method, table, search, bodyTe
   // admin_logs 表：仅允许管理员清空（DELETE），其余写入/修改一律拒绝（M1 日志伪造）
   if (table === 'admin_logs') {
     if (method === 'DELETE') {
-      if (!(await checkAdmin(config, session.username))) throw new Error('仅管理员可清空操作日志');
+      if (!(await checkAdmin(config, session.username, tenant))) throw new Error('仅管理员可清空操作日志');
       return null;
     }
     throw new Error('操作日志不允许写入或修改');
@@ -184,11 +194,11 @@ async function enforceWritePolicy(config, session, method, table, search, bodyTe
 
   // site_config / bubble_config / logs：一律要求管理员（P0-01）
   if (ADMIN_ONLY_TABLES.has(table)) {
-    if (!(await checkAdmin(config, session.username))) throw new Error('该表不允许普通用户写入');
+    if (!(await checkAdmin(config, session.username, tenant))) throw new Error('该表不允许普通用户写入');
     return null;
   }
 
-  const isAdmin = await checkAdmin(config, session.username);
+  const isAdmin = await checkAdmin(config, session.username, tenant);
 
   // POST：归属表必须用当前用户身份发布，防止冒充他人
   if (method === 'POST') {
@@ -279,7 +289,7 @@ async function sanitizeInteractionPatch(config, session, table, idRaw, payload) 
     }
     for (const c of removedDb) {
       const author = String((c && c.author) || '');
-      if (author !== me && !(await checkAdmin(config, me))) throw new Error('只能删除自己的评论');
+      if (author !== me && !(await checkAdmin(config, me, tenant))) throw new Error('只能删除自己的评论');
     }
     // 以库内数组为基准：未变化的评论原样保留，新增评论前置
     out.comments = addedClient.concat(dbComments.filter((_, i) => dbUsed[i]));
@@ -334,10 +344,29 @@ async function applyReadFilter(config, username, table, text, status, isAdmin, i
 
 // 服务端在转发前强制注入行级过滤条件（S2 的核心防线）
 // 与前端传入的 select 列、where 条件完全无关：数据库层先过滤，再返回结果
-function buildSafeSearch(url, table, method, username, isAdmin, isCouple) {
-  if (method !== 'GET' && method !== 'HEAD') return url.search;
+function buildSafeSearch(url, table, method, username, isAdmin, isCouple, tenant) {
   const params = new URLSearchParams(url.search);
   const andParts = [];
+  const tid = Number(tenant ? tenant.id : 1);
+
+  // 0) 租户隔离（最高优先级）：任何请求都强制限定当前租户，忽略/剥离客户端伪造的 tenant_id
+  params.delete('tenant_id');
+  andParts.push('tenant_id.eq.' + tid);
+
+  // 写操作（PATCH/DELETE 按 id 定位）：仅叠加租户条件，防止跨租户改/删
+  if (method !== 'GET' && method !== 'HEAD') {
+    params.getAll('and').forEach(v => {
+      if (!v) return;
+      let inner = String(v).trim();
+      if (inner.startsWith('(') && inner.endsWith(')')) inner = inner.slice(1, -1).trim();
+      if (inner) andParts.push(inner);
+    });
+    params.delete('and');
+    if (andParts.length) params.append('and', '(' + andParts.join(',') + ')');
+    const ws = params.toString();
+    return ws ? '?' + ws : '';
+  }
+
   // 用户名字符集与改名字符集一致（P2-07）
   const safeName = /^[A-Za-z0-9_.-]{1,64}$/.test(String(username)) ? username : '';
 
@@ -358,7 +387,7 @@ function buildSafeSearch(url, table, method, username, isAdmin, isCouple) {
     andParts.push('or(privacy.is.null,privacy.neq.private,author.eq.' + safeName + ')');
   }
 
-  // 4) users 表：非管理员只能看到自己那一行
+  // 4) users 表：非管理员只能看到自己租户内的行
   if (table === 'users' && !isAdmin && safeName) {
     params.delete('username');
     params.append('username', 'eq.' + safeName);
@@ -377,6 +406,17 @@ function buildSafeSearch(url, table, method, username, isAdmin, isCouple) {
 
   const s = params.toString();
   return s ? '?' + s : '';
+}
+
+// 写操作 body 强制 tenant_id：剥离客户端值，覆盖为当前租户
+function enforceTenantOnBody(bodyText, tenantId) {
+  let payload;
+  try { payload = JSON.parse(bodyText || '{}'); }
+  catch (e) { payload = {}; }
+  if (payload && typeof payload === 'object' && !Array.isArray(payload)) {
+    payload.tenant_id = Number(tenantId);
+  }
+  return JSON.stringify(payload);
 }
 
 // 把数据库写操作翻译成人类可读的日志动作名

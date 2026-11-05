@@ -3,6 +3,7 @@ import {
   checkAllowedOrigin, corsHeaders, jsonResponse,
   arrayBufferToHex, constantTimeEqual, randomHex
 } from '../_lib/session.js';
+import { resolveTenant } from '../_lib/tenant.js';
 
 const PASSWORD_MIN_LENGTH = 8;   // 注册/改密/重置最小长度（登录路径不做长度校验，保证老账号照常登录）
 // Cloudflare Workers 的 WebCrypto 基于 V8，PBKDF2 迭代上限 100000（超过即 NotSupportedError）
@@ -82,20 +83,22 @@ export async function onRequest(context) {
     return jsonResponse({ error: 'Expected JSON request body.' }, 400, headers);
   }
 
+  const tenant = await resolveTenant(request, config);
+
   try {
-    const result = await handleAction(config, body || {}, request);
-    await accountLog(config, (body || {}).action || '', body || {}, result, request, null);
+    const result = await handleAction(config, body || {}, request, tenant);
+    await accountLog(config, (body || {}).action || '', body || {}, result, request, null, tenant);
     return jsonResponse(result, 200, headers);
   } catch (error) {
-    await accountLog(config, (body || {}).action || '', body || {}, null, request, error);
+    await accountLog(config, (body || {}).action || '', body || {}, null, request, error, tenant);
     return jsonResponse({ error: error.message || 'Account request failed.' }, error.status || 500, headers);
   }
 }
 
 // ---------- 服务端操作日志（带真实 IP/UA，防伪造；失败静默） ----------
-async function serverLog(config, action, username, details) {
+async function serverLog(config, action, username, details, tenant) {
   try {
-    const row = { action, user: username || 'guest', details: JSON.stringify(details || {}), created_at: new Date().toISOString() };
+    const row = { tenant_id: Number(tenant ? tenant.id : 1), action, user: username || 'guest', details: JSON.stringify(details || {}), created_at: new Date().toISOString() };
     await fetch(`${config.supabaseUrl}/rest/v1/admin_logs`, {
       method: 'POST',
       headers: { apikey: config.serviceKey, Authorization: `Bearer ${config.serviceKey}`, 'Content-Type': 'application/json' },
@@ -105,11 +108,11 @@ async function serverLog(config, action, username, details) {
 }
 
 // ---------- 前端行为埋点（批量，登录用户记 username，访客记 guest+IP） ----------
-async function trackEvents(config, body, request) {
+async function trackEvents(config, body, request, tenant) {
   const events = Array.isArray(body.events) ? body.events.slice(0, 20) : [];
   if (events.length === 0) return { tracked: 0 };
   let username = 'guest';
-  try { const sess = await requireSession(config, body.sessionToken); username = sess.username; } catch (e) { /* guest */ }
+  try { const sess = await requireSession(config, body.sessionToken, tenant); username = sess.username; } catch (e) { /* guest */ }
   const ip = request.headers.get('CF-Connecting-IP') || request.headers.get('x-real-ip') || '';
   const ua = (request.headers.get('user-agent') || '').substring(0, 120);
   const pageUrl = String(body.page_url || '').substring(0, 120);
@@ -121,7 +124,7 @@ async function trackEvents(config, body, request) {
     if (ev.extra && typeof ev.extra === 'object') {
       for (const k of Object.keys(ev.extra).slice(0, 5)) details['x_' + k] = String(ev.extra[k]).substring(0, 100);
     }
-    await serverLog(config, '行为:' + type, username, details);
+    await serverLog(config, '行为:' + type, username, details, tenant);
   }
   return { tracked: events.length };
 }
@@ -136,7 +139,7 @@ const ACCOUNT_LOG_LABELS = {
   logout: '用户登出', testNotify: '发送测试邮件'
 };
 
-async function accountLog(config, action, body, result, request, error) {
+async function accountLog(config, action, body, result, request, error, tenant) {
   try {
     let label = '';
     let username = '';
@@ -154,7 +157,7 @@ async function accountLog(config, action, body, result, request, error) {
       label = '新用户注册';
     } else if (ACCOUNT_LOG_LABELS[action]) {
       label = ACCOUNT_LOG_LABELS[action];
-      try { const sess = await requireSession(config, body.sessionToken); username = sess.username; } catch (e) { username = 'guest'; }
+      try { const sess = await requireSession(config, body.sessionToken, tenant); username = sess.username; } catch (e) { username = 'guest'; }
     } else {
       return;
     }
@@ -162,92 +165,94 @@ async function accountLog(config, action, body, result, request, error) {
     if (action !== 'login' && body.username) details.target = body.username;
     if (action === 'changeUsername') details.new_username = cleanUsername(body.newUsername);
     if (body.email) details.email = body.email;
-    await serverLog(config, label, username, details);
+    await serverLog(config, label, username, details, tenant);
   } catch (e) {}
 }
 
-async function handleAction(config, body, request) {
+async function handleAction(config, body, request, tenant) {
   const action = String(body.action || '');
   if (action === 'login') {
     const key = `rate_login_${getClientIp(request)}_${cleanUsername(body.username)}`;
     await checkAuthRate(config, key, LOGIN_MAX_FAIL, LOGIN_WINDOW_MS, LOGIN_LOCK_MS);
-    try { const r = await login(config, body); await clearAuthRate(config, key); return r; }
+    try { const r = await login(config, body, tenant); await clearAuthRate(config, key); return r; }
     catch (e) { await recordAuthFailure(config, key, LOGIN_WINDOW_MS, LOGIN_LOCK_MS, LOGIN_MAX_FAIL); throw e; }
   }
   if (action === 'publicRegister') {
     const key = `rate_register_${getClientIp(request)}`;
     await checkAuthRate(config, key, REG_MAX_FAIL, REG_WINDOW_MS, REG_LOCK_MS);
-    try { const r = await publicRegister(config, body); await clearAuthRate(config, key); return r; }
+    try { const r = await publicRegister(config, body, tenant); await clearAuthRate(config, key); return r; }
     catch (e) { await recordAuthFailure(config, key, REG_WINDOW_MS, REG_LOCK_MS, REG_MAX_FAIL); throw e; }
   }
-  if (action === 'track') return trackEvents(config, body, request);
+  if (action === 'track') return trackEvents(config, body, request, tenant);
   // 登录页公开查询注册配置（无需登录）。只返回是否开放注册/通道是否开启，绝不泄露邀请码本身
-  if (action === 'getRegisterOpen') return getRegisterOpen(config);
+  if (action === 'getRegisterOpen') return getRegisterOpen(config, tenant);
   // 公开读取主题设置（游客登录页也需应用主题）；写主题需管理员
-  if (action === 'getTheme') return getTheme(config);
+  if (action === 'getTheme') return getTheme(config, tenant);
 
-  const session = await requireSession(config, body.sessionToken);
-  if (action === 'me') return { user: await getPublicUser(config, session.username) };
-  if (action === 'listUsers') return requireAdminThen(config, session.username, () => listUsers(config));
-  if (action === 'createUser') return requireAdminThen(config, session.username, () => createUser(config, body));
-  if (action === 'deleteUser') return requireAdminThen(config, session.username, () => deleteUser(config, body.username));
-  if (action === 'toggleUserRole') return requireAdminThen(config, session.username, () => toggleUserRole(config, body.username));
-  if (action === 'setUserPermission') return requireAdminThen(config, session.username, () => setUserPermission(config, body.username, body.permission));
-  if (action === 'setUserPassword') return requireAdminThen(config, session.username, () => setUserPassword(config, body.username, body.newPassword));
-  if (action === 'changePassword') return changePassword(config, session.username, body.oldPassword, body.newPassword);
-  if (action === 'changeUsername') return changeUsername(config, session.username, body);
-  if (action === 'updateAvatar') return updateAvatar(config, session.username, body.avatar);
-  if (action === 'updateActivity') return updateActivity(config, session.username);
-  if (action === 'onlineStatus') return onlineStatus(config, session.username);
-  if (action === 'setMyEmail') return setMyEmail(config, session.username, body.email);
-  if (action === 'getNotifyConfig') return getNotifyConfig(config, session.username);
-  if (action === 'notify') return sendNotify(config, session.username, body);
-  if (action === 'setNotifyConfig') return requireAdminThen(config, session.username, () => setNotifyConfig(config, session.username, body));
-  if (action === 'setNotifySwitches') return requireAdminThen(config, session.username, () => setNotifySwitches(config, body));
-  if (action === 'setUserEmail') return requireAdminThen(config, session.username, () => setUserEmail(config, body));
-  if (action === 'setSignupCode') return requireAdminThen(config, session.username, () => setSignupCode(config, body));
-  if (action === 'setRegisterOpen') return requireAdminThen(config, session.username, () => setRegisterOpen(config, body));
-  if (action === 'getSignupCode') return requireAdminThen(config, session.username, () => getSignupCode(config));
-  if (action === 'getBubbleConfig') return requireAdminThen(config, session.username, () => getBubbleConfig(config));
-  if (action === 'setBubbleConfig') return requireAdminThen(config, session.username, () => setBubbleConfig(config, body));
-  if (action === 'setTheme') return requireAdminThen(config, session.username, () => setTheme(config, body));
-  if (action === 'testNotify') return requireAdminThen(config, session.username, () => testNotify(config, session.username, body));
-  if (action === 'logout') return logout(config, session.username);
+  const session = await requireSession(config, body.sessionToken, tenant);
+  if (action === 'me') return { user: await getPublicUser(config, session.username, tenant) };
+  if (action === 'listUsers') return requireAdminThen(config, session.username, () => listUsers(config, tenant), tenant);
+  if (action === 'createUser') return requireAdminThen(config, session.username, () => createUser(config, body, tenant), tenant);
+  if (action === 'deleteUser') return requireAdminThen(config, session.username, () => deleteUser(config, body.username, tenant), tenant);
+  if (action === 'toggleUserRole') return requireAdminThen(config, session.username, () => toggleUserRole(config, body.username, tenant), tenant);
+  if (action === 'setUserPermission') return requireAdminThen(config, session.username, () => setUserPermission(config, body.username, body.permission, tenant), tenant);
+  if (action === 'setUserPassword') return requireAdminThen(config, session.username, () => setUserPassword(config, body.username, body.newPassword, tenant), tenant);
+  if (action === 'changePassword') return changePassword(config, session.username, body.oldPassword, body.newPassword, tenant);
+  if (action === 'changeUsername') return changeUsername(config, session.username, body, tenant);
+  if (action === 'updateAvatar') return updateAvatar(config, session.username, body.avatar, tenant);
+  if (action === 'updateActivity') return updateActivity(config, session.username, tenant);
+  if (action === 'onlineStatus') return onlineStatus(config, session.username, tenant);
+  if (action === 'setMyEmail') return setMyEmail(config, session.username, body.email, tenant);
+  if (action === 'getNotifyConfig') return getNotifyConfig(config, session.username, tenant);
+  if (action === 'notify') return sendNotify(config, session.username, body, tenant);
+  if (action === 'setNotifyConfig') return requireAdminThen(config, session.username, () => setNotifyConfig(config, session.username, body, tenant), tenant);
+  if (action === 'setNotifySwitches') return requireAdminThen(config, session.username, () => setNotifySwitches(config, body, tenant), tenant);
+  if (action === 'setUserEmail') return requireAdminThen(config, session.username, () => setUserEmail(config, body, tenant), tenant);
+  if (action === 'setSignupCode') return requireAdminThen(config, session.username, () => setSignupCode(config, body, tenant), tenant);
+  if (action === 'setRegisterOpen') return requireAdminThen(config, session.username, () => setRegisterOpen(config, body, tenant), tenant);
+  if (action === 'getSignupCode') return requireAdminThen(config, session.username, () => getSignupCode(config, tenant), tenant);
+  if (action === 'getBubbleConfig') return requireAdminThen(config, session.username, () => getBubbleConfig(config, tenant), tenant);
+  if (action === 'setBubbleConfig') return requireAdminThen(config, session.username, () => setBubbleConfig(config, body, tenant), tenant);
+  if (action === 'setTheme') return requireAdminThen(config, session.username, () => setTheme(config, body, tenant), tenant);
+  if (action === 'testNotify') return requireAdminThen(config, session.username, () => testNotify(config, session.username, body, tenant), tenant);
+  if (action === 'logout') return logout(config, session.username, tenant);
 
   throw httpError(400, 'Unknown account action.');
 }
 
-async function login(config, body) {
+async function login(config, body, tenant) {
+  if (tenant && tenant.status === 'suspended') throw httpError(403, '该站点已停用，暂无法登录');
   const username = cleanUsername(body.username);
   const password = String(body.password || '');
   if (!username || !password) throw httpError(400, '请输入账号和密码');
 
-  const user = await fetchUser(config, username, USER_COLUMNS);
-  if (!user || !(await verifyPassword(config, password, user))) throw httpError(401, '账号或密码错误');
+  const user = await fetchUser(config, username, USER_COLUMNS, tenant);
+  if (!user || !(await verifyPassword(config, password, user, tenant))) throw httpError(401, '账号或密码错误');
 
-  if (!user.password_hash) await updatePassword(config, username, password);
-  await patchUser(config, username, { last_active: new Date().toISOString(), is_online: true });
+  if (!user.password_hash) await updatePassword(config, username, password, tenant);
+  await patchUser(config, username, { last_active: new Date().toISOString(), is_online: true }, tenant);
 
   return {
     user: sanitizeUser({ ...user, password: undefined }),
-    sessionToken: await signSession(config, username)
+    sessionToken: await signSession(config, username, Number(tenant ? tenant.id : 1))
   };
 }
 
-async function listUsers(config) {
+async function listUsers(config, tenant) {
   // 后台用户列表只展示首字母/角色/权限/在线状态，不返回大体积 base64 头像，
   // 避免响应体过大（此前可达 180KB+）导致移动端/弱网下后台加载超时
+  const tid = Number(tenant ? tenant.id : 1);
   const LIST_USER_COLUMNS = 'username,permission,role,last_active,is_online';
-  const rows = await supabase(config, `/users?select=${encodeURIComponent(LIST_USER_COLUMNS)}&order=username.asc`, { method: 'GET' });
+  const rows = await supabase(config, `/users?tenant_id=eq.${tid}&select=${encodeURIComponent(LIST_USER_COLUMNS)}&order=username.asc`, { method: 'GET' });
   return { users: (rows || []).map(sanitizeUser) };
 }
 
-async function createUser(config, body) {
+async function createUser(config, body, tenant) {
   const username = cleanUsername(body.username);
   const password = String(body.password || '');
   if (!username || !password) throw httpError(400, '请填写账号和密码');
   assertPassword(password);
-  if (await fetchUser(config, username, PUBLIC_USER_COLUMNS)) throw httpError(409, '账号已存在');
+  if (await fetchUser(config, username, PUBLIC_USER_COLUMNS, tenant)) throw httpError(409, '账号已存在');
 
   const passwordData = await buildPasswordFields(config, password);
   const row = await insertUser(config, {
@@ -257,54 +262,77 @@ async function createUser(config, body) {
     permission: 'full',
     role: 'user',
     is_online: false
-  });
+  }, tenant);
   return { user: sanitizeUser(row) };
 }
 
 // 登录页公开注册：不需要登录
-// 两种模式：①管理员开启"开放注册"则无需邀请码；②否则必须持有管理员设置的邀请码
-async function publicRegister(config, body) {
+// ①默认租户/已激活租户：管理员开启"开放注册"则无需邀请码，否则必须持有邀请码
+// ②待接管租户（awaiting_owner）：跳过邀请码，第一个注册者原子抢占为该租户管理员
+async function publicRegister(config, body, tenant) {
+  const tid = Number(tenant ? tenant.id : 1);
   const username = cleanUsername(body.username);
   const password = String(body.password || '');
   const inviteCode = String(body.inviteCode || '').trim();
   if (!username || !password) throw httpError(400, '请填写账号和密码');
   assertPassword(password);
 
-  let m = {};
-  try { m = await getSiteValues(config); } catch (e) { throw httpError(400, '注册服务暂不可用，请稍后再试'); }
-  const registerOpen = m.register_open === '1' || m.register_open === 'true' || m.register_open === true;
-  const signupCode = String(m.signup_code || '').trim();
+  if (tenant.status === 'suspended') throw httpError(403, '该站点已停用，暂无法注册');
+  const isAwaiting = tid > 1 && tenant.status === 'awaiting_owner';
 
-  if (!registerOpen) {
-    if (!inviteCode) throw httpError(400, '请填写注册邀请码');
-    if (!signupCode) throw httpError(403, '注册通道未开通，请联系管理员');
-    if (inviteCode !== signupCode) throw httpError(403, '邀请码不正确');
+  if (!isAwaiting) {
+    let m = {};
+    try { m = await getSiteValues(config, tenant); } catch (e) { throw httpError(400, '注册服务暂不可用，请稍后再试'); }
+    const registerOpen = m.register_open === '1' || m.register_open === 'true' || m.register_open === true;
+    const signupCode = String(m.signup_code || '').trim();
+
+    if (!registerOpen) {
+      if (!inviteCode) throw httpError(400, '请填写注册邀请码');
+      if (!signupCode) throw httpError(403, '注册通道未开通，请联系管理员');
+      if (inviteCode !== signupCode) throw httpError(403, '邀请码不正确');
+    }
   }
 
-  if (await fetchUser(config, username, PUBLIC_USER_COLUMNS)) throw httpError(409, '账号已存在');
+  if (await fetchUser(config, username, PUBLIC_USER_COLUMNS, tenant)) throw httpError(409, '账号已存在');
   const passwordData = await buildPasswordFields(config, password);
   const row = await insertUser(config, {
     username,
     ...passwordData,
     avatar: '',
-    permission: 'comment',  // 自助注册默认仅可评论/点赞，管理员可在后台提升为完全权限
+    permission: isAwaiting ? 'full' : 'comment',  // 抢占者给完全权限；普通自助注册默认仅可评论/点赞
     role: 'user',
     is_online: false
-  });
+  }, tenant);
+
+  let becameOwner = false;
+  if (isAwaiting) {
+    // 原子抢占：仅当 owner_id 仍为空时 update 才命中，并发下保证只有一个管理员
+    const upd = await supabase(config, `/tenants?id=eq.${tid}&owner_id=is.null`, {
+      method: 'PATCH',
+      body: { owner_id: username, status: 'active', updated_at: new Date().toISOString() },
+      prefer: 'return=representation'
+    });
+    becameOwner = Array.isArray(upd) && upd.length === 1 && upd[0].owner_id === username;
+    if (becameOwner) {
+      await patchUser(config, username, { role: 'admin' }, tenant);
+      row.role = 'admin';
+    }
+  }
+
   // 注册成功直接登录，省去再次输入
-  await patchUser(config, username, { last_active: new Date().toISOString(), is_online: true });
-  return { user: sanitizeUser(row), sessionToken: await signSession(config, username) };
+  await patchUser(config, username, { last_active: new Date().toISOString(), is_online: true }, tenant);
+  return { user: sanitizeUser(row), sessionToken: await signSession(config, username, tid), becameOwner };
 }
 
-async function setSignupCode(config, body) {
+async function setSignupCode(config, body, tenant) {
   const code = String(body.code || '').trim();
-  await setSiteValue(config, 'signup_code', code);  // 空字符串即关闭注册通道
+  await setSiteValue(config, 'signup_code', code, tenant);  // 空字符串即关闭注册通道
   return { ok: true, code };
 }
 
-async function getSignupCode(config) {
+async function getSignupCode(config, tenant) {
   let m = {};
-  try { m = await getSiteValues(config); } catch (e) { return { code: '', register_open: false }; }
+  try { m = await getSiteValues(config, tenant); } catch (e) { return { code: '', register_open: false }; }
   return {
     code: m.signup_code || '',
     register_open: m.register_open === '1' || m.register_open === 'true' || m.register_open === true
@@ -313,130 +341,147 @@ async function getSignupCode(config) {
 
 // ---------- UI 主题 ----------
 const THEME_KEYS = ['rose', 'dark', 'moonlight', 'sakura', 'matcha', 'caramel', 'lavender', 'ocean', 'nightgold', 'ivory'];
-async function getTheme(config) {
+async function getTheme(config, tenant) {
   let m = {};
-  try { m = await getSiteValues(config); } catch (e) { return { theme: 'rose', themes: THEME_KEYS }; }
+  try { m = await getSiteValues(config, tenant); } catch (e) { return { theme: 'rose', themes: THEME_KEYS }; }
   const theme = m.ui_theme || 'rose';
   return { theme: THEME_KEYS.indexOf(theme) >= 0 ? theme : 'rose', themes: THEME_KEYS };
 }
-async function setTheme(config, body) {
+async function setTheme(config, body, tenant) {
   const theme = String(body.theme || 'rose');
   if (THEME_KEYS.indexOf(theme) < 0) throw httpError(400, '不支持的主题：' + theme);
-  await setSiteValue(config, 'ui_theme', theme);
+  await setSiteValue(config, 'ui_theme', theme, tenant);
   return { ok: true, theme };
 }
 
 
 // 登录页公开查询（无需登录）：只暴露"是否需要邀请码"，不返回邀请码内容
-async function getRegisterOpen(config) {
+async function getRegisterOpen(config, tenant) {
+  // 新开小站处于 awaiting_owner：注册必须敞开，首位注册者自动成为管理员（跳过邀请码）
+  const tid = Number(tenant ? tenant.id : 1);
+  const awaitingOwner = tid > 1 && tenant && tenant.status === 'awaiting_owner';
   let m = {};
-  try { m = await getSiteValues(config); } catch (e) { return { open: false, channel: false }; }
-  const open = m.register_open === '1' || m.register_open === 'true' || m.register_open === true;
+  try { m = await getSiteValues(config, tenant); } catch (e) {
+    return awaitingOwner
+      ? { open: true, channel: true, awaitingOwner: true, tenantSlug: tenant.slug }
+      : { open: false, channel: false };
+  }
+  const open = awaitingOwner || m.register_open === '1' || m.register_open === 'true' || m.register_open === true;
   const channel = open || !!String(m.signup_code || '').trim();
-  return { open, channel };
+  return {
+    open, channel, awaitingOwner,
+    tenantSlug: tid > 1 && tenant ? tenant.slug : ''
+  };
 }
 
-async function setRegisterOpen(config, body) {
+async function setRegisterOpen(config, body, tenant) {
   const open = body.open === true || body.open === '1' || body.open === 'true';
-  await setSiteValue(config, 'register_open', open ? '1' : '0');
+  await setSiteValue(config, 'register_open', open ? '1' : '0', tenant);
   return { ok: true, register_open: open };
 }
 
-async function getBubbleConfig(config) {
+async function getBubbleConfig(config, tenant) {
+  const tid = Number(tenant ? tenant.id : 1);
   try {
-    const rows = await supabase(config, '/bubble_config?select=id,enabled,interval,photo_scope&limit=1', { method: 'GET' });
+    const rows = await supabase(config, `/bubble_config?tenant_id=eq.${tid}&select=enabled,interval,photo_scope&limit=1`, { method: 'GET' });
     const row = (rows && rows[0]) || null;
     return { enabled: row ? row.enabled !== false : true, interval: (row && row.interval) || 12, photo_scope: (row && row.photo_scope) || 'all' };
   } catch (e) { return { enabled: true, interval: 12, photo_scope: 'all' }; }
 }
 
-async function setBubbleConfig(config, body) {
+async function setBubbleConfig(config, body, tenant) {
+  const tid = Number(tenant ? tenant.id : 1);
   const enabled = body.enabled !== false;
   const interval = Math.max(3, Math.min(120, parseInt(body.interval, 10) || 12));
   // photo_scope：气泡照片来源范围（隐私控制），白名单校验
   const scope = ['all', 'feeds', 'messages', 'none'].includes(body.photo_scope) ? body.photo_scope : 'all';
-  const rows = await supabase(config, '/bubble_config?select=id&limit=1', { method: 'GET' });
+  const rows = await supabase(config, `/bubble_config?tenant_id=eq.${tid}&select=id&limit=1`, { method: 'GET' });
   if (rows && rows[0] && rows[0].id) {
-    await supabase(config, `/bubble_config?id=eq.${encodeURIComponent(rows[0].id)}`, { method: 'PATCH', body: { enabled, interval, photo_scope: scope }, prefer: 'return=representation' });
+    await supabase(config, `/bubble_config?id=eq.${encodeURIComponent(rows[0].id)}&tenant_id=eq.${tid}`, { method: 'PATCH', body: { enabled, interval, photo_scope: scope }, prefer: 'return=representation' });
   } else {
-    await supabase(config, '/bubble_config', { method: 'POST', body: { enabled, interval, photo_scope: scope }, prefer: 'return=representation' });
+    await supabase(config, '/bubble_config', { method: 'POST', body: { tenant_id: tid, enabled, interval, photo_scope: scope }, prefer: 'return=representation' });
   }
   return { ok: true, enabled, interval, photo_scope: scope };
 }
 
-async function deleteUser(config, usernameInput) {
+async function deleteUser(config, usernameInput, tenant) {
+  const tid = Number(tenant ? tenant.id : 1);
   const username = cleanUsername(usernameInput);
   if (!username) throw httpError(400, '用户不存在');
-  if (username === 'admin') throw httpError(400, '不能删除管理员账号');
-  await supabase(config, `/users?username=eq.${encodeURIComponent(username)}`, { method: 'DELETE' });
+  if (tid === 1 && username === 'admin') throw httpError(400, '不能删除管理员账号');
+  await supabase(config, `/users?tenant_id=eq.${tid}&username=eq.${encodeURIComponent(username)}`, { method: 'DELETE' });
   return { ok: true };
 }
 
-async function toggleUserRole(config, usernameInput) {
+async function toggleUserRole(config, usernameInput, tenant) {
+  const tid = Number(tenant ? tenant.id : 1);
   const username = cleanUsername(usernameInput);
   if (!username) throw httpError(400, '用户不存在');
-  if (username === 'admin') throw httpError(400, '不能修改超级管理员的角色');
-  const user = await fetchUser(config, username, PUBLIC_USER_COLUMNS);
+  if (tid === 1 && username === 'admin') throw httpError(400, '不能修改超级管理员的角色');
+  const user = await fetchUser(config, username, PUBLIC_USER_COLUMNS, tenant);
   if (!user) throw httpError(404, '用户不存在');
   const role = user.role === 'admin' ? 'user' : 'admin';
-  return { user: sanitizeUser(await patchUser(config, username, { role })) };
+  return { user: sanitizeUser(await patchUser(config, username, { role }, tenant)) };
 }
 
-async function setUserPermission(config, usernameInput, permissionInput) {
+async function setUserPermission(config, usernameInput, permissionInput, tenant) {
+  const tid = Number(tenant ? tenant.id : 1);
   const username = cleanUsername(usernameInput);
   const permission = String(permissionInput || '');
   if (!username) throw httpError(400, '用户不存在');
-  if (username === 'admin') throw httpError(400, '不能修改超级管理员的权限');
+  if (tid === 1 && username === 'admin') throw httpError(400, '不能修改超级管理员的权限');
   if (!['view', 'comment', 'full'].includes(permission)) throw httpError(400, '权限值不正确');
-  const user = await fetchUser(config, username, PUBLIC_USER_COLUMNS);
+  const user = await fetchUser(config, username, PUBLIC_USER_COLUMNS, tenant);
   if (!user) throw httpError(404, '用户不存在');
-  return { user: sanitizeUser(await patchUser(config, username, { permission })) };
+  return { user: sanitizeUser(await patchUser(config, username, { permission }, tenant)) };
 }
 
-async function setUserPassword(config, usernameInput, newPassword) {
+async function setUserPassword(config, usernameInput, newPassword, tenant) {
+  const tid = Number(tenant ? tenant.id : 1);
   const username = cleanUsername(usernameInput);
   if (!username) throw httpError(400, '用户不存在');
-  // 安全：任何管理员都不能重置超级管理员 admin 的密码（admin 只能通过“修改密码”并输入原密码自己改）
-  if (username === 'admin') throw httpError(400, '不能修改超级管理员的密码');
-  const user = await fetchUser(config, username, PUBLIC_USER_COLUMNS);
+  // 安全：任何管理员都不能重置平台超管 admin 的密码（admin 只能通过“修改密码”并输入原密码自己改）
+  if (tid === 1 && username === 'admin') throw httpError(400, '不能修改超级管理员的密码');
+  const user = await fetchUser(config, username, PUBLIC_USER_COLUMNS, tenant);
   if (!user) throw httpError(404, '用户不存在');
   assertPassword(String(newPassword || ''));
-  await updatePassword(config, username, String(newPassword));
+  await updatePassword(config, username, String(newPassword), tenant);
   return { ok: true };
 }
 
-async function changePassword(config, username, oldPassword, newPassword) {
-  const user = await fetchUser(config, username, USER_COLUMNS);
-  if (!user || !(await verifyPassword(config, String(oldPassword || ''), user))) throw httpError(401, '原密码错误');
+async function changePassword(config, username, oldPassword, newPassword, tenant) {
+  const user = await fetchUser(config, username, USER_COLUMNS, tenant);
+  if (!user || !(await verifyPassword(config, String(oldPassword || ''), user, tenant))) throw httpError(401, '原密码错误');
   assertPassword(String(newPassword || ''));
-  await updatePassword(config, username, String(newPassword));
+  await updatePassword(config, username, String(newPassword), tenant);
   return { ok: true };
 }
 
-async function changeUsername(config, username, body) {
+async function changeUsername(config, username, body, tenant) {
+  const tid = Number(tenant ? tenant.id : 1);
   const newName = cleanUsername(body.newUsername);
   if (!newName) throw httpError(400, '新用户名不能为空');
   if (!/^[A-Za-z0-9_.-]+$/.test(newName)) throw httpError(400, '用户名只能包含字母、数字、下划线、点、减号');
   if (newName.length > 64) throw httpError(400, '用户名最长 64 个字符');
   if (newName === 'admin') throw httpError(400, '该用户名不可用，请更换');
-  if (username === 'admin') throw httpError(400, '当前账号不允许修改用户名');
+  if (tid === 1 && username === 'admin') throw httpError(400, '当前账号不允许修改用户名');
   if (newName === username) throw httpError(400, '新用户名与当前用户名相同');
 
   // 必须验证密码，防止会话被冒用后改名
-  const user = await fetchUser(config, username, USER_COLUMNS);
+  const user = await fetchUser(config, username, USER_COLUMNS, tenant);
   if (!user) throw httpError(404, '用户不存在');
-  if (!(await verifyPassword(config, String(body.password || ''), user))) throw httpError(401, '密码错误，请确认后再修改');
+  if (!(await verifyPassword(config, String(body.password || ''), user, tenant))) throw httpError(401, '密码错误，请确认后再修改');
 
-  // 原子级联更新所有内容表（数据库函数 change_username）
+  // 原子级联更新所有内容表（带租户的重载版 change_username）
   try {
     await supabase(config, '/rpc/change_username', {
       method: 'POST',
-      body: { old_name: username, new_name: newName }
+      body: { old_name: username, new_name: newName, p_tenant_id: tid }
     });
   } catch (e) {
     const msg = String(e && e.message || '');
-    if (/function.*change_username|could not find|does not exist/i.test(msg)) {
-      throw httpError(500, '改名功能未就绪：数据库函数尚未创建');
+    if (/function.*change_username|could not find|does not exist|multiple functions/i.test(msg)) {
+      throw httpError(500, '改名功能未就绪：数据库多租户函数尚未创建');
     }
     throw httpError(400, msg || '修改失败');
   }
@@ -444,13 +489,13 @@ async function changeUsername(config, username, body) {
   // 级联补漏：登录页背景授权列表（login_bg_config.authorized_users 为 text[]）
   // 不在 change_username 覆盖范围内，改名后旧名残留会导致授权用户悄悄失去背景设置权限
   try {
-    const cfgRows = await supabase(config, '/login_bg_config?select=id,authorized_users&limit=1', { method: 'GET' });
+    const cfgRows = await supabase(config, `/login_bg_config?tenant_id=eq.${tid}&select=id,authorized_users&limit=1`, { method: 'GET' });
     if (cfgRows && cfgRows[0]) {
       const row = cfgRows[0];
       const arr = Array.isArray(row.authorized_users) ? row.authorized_users : [];
       const next = arr.map(u => (u === username ? newName : u));
       if (next.join('\u0000') !== arr.join('\u0000')) {
-        await supabase(config, `/login_bg_config?id=eq.${encodeURIComponent(row.id)}`, {
+        await supabase(config, `/login_bg_config?id=eq.${encodeURIComponent(row.id)}&tenant_id=eq.${tid}`, {
           method: 'PATCH',
           body: { authorized_users: next, updated_by: newName, updated_at: new Date().toISOString() }
         });
@@ -459,15 +504,15 @@ async function changeUsername(config, username, body) {
   } catch (e) { /* 表未初始化/已删除时跳过，不阻断改名 */ }
 
   // 改名成功，重新读取新账号并签发新会话
-  const newUser = await fetchUser(config, newName, USER_COLUMNS);
+  const newUser = await fetchUser(config, newName, USER_COLUMNS, tenant);
   if (!newUser) throw httpError(500, '修改已提交，但读取新账号失败');
   return {
     user: sanitizeUser({ ...newUser, password: undefined }),
-    sessionToken: await signSession(config, newName)
+    sessionToken: await signSession(config, newName, tid)
   };
 }
 
-async function updateAvatar(config, username, avatar) {
+async function updateAvatar(config, username, avatar, tenant) {
   const value = String(avatar || '');
   if (!value.startsWith('data:image/')) throw httpError(400, '头像格式不正确');
   // P2-01：限制 base64 解码后体积 ≤500KB，避免膨胀 users 表与 me 接口响应
@@ -475,45 +520,47 @@ async function updateAvatar(config, username, avatar) {
   const padding = b64.endsWith('==') ? 2 : (b64.endsWith('=') ? 1 : 0);
   const decodedBytes = Math.floor((b64.length * 3) / 4) - padding;
   if (decodedBytes > AVATAR_MAX_BYTES) throw httpError(400, '头像过大：请使用 500KB 以内的图片');
-  return { user: sanitizeUser(await patchUser(config, username, { avatar: value })) };
+  return { user: sanitizeUser(await patchUser(config, username, { avatar: value }, tenant)) };
 }
 
-async function updateActivity(config, username) {
-  await patchUser(config, username, { last_active: new Date().toISOString(), is_online: true });
+async function updateActivity(config, username, tenant) {
+  await patchUser(config, username, { last_active: new Date().toISOString(), is_online: true }, tenant);
   return { ok: true };
 }
 
-async function onlineStatus(config, username) {
+async function onlineStatus(config, username, tenant) {
   // admin 登录时也能看到对方的在线状态（返回 boy/girl 中存在的账号）
   if (username === 'admin') {
     for (const t of ['girl', 'boy']) {
-      const u = await fetchUser(config, t, PUBLIC_USER_COLUMNS);
+      const u = await fetchUser(config, t, PUBLIC_USER_COLUMNS, tenant);
       if (u) return { user: sanitizeUser(u) };
     }
     return { user: null };
   }
   const target = username === 'boy' ? 'girl' : (username === 'girl' ? 'boy' : '');
   if (!target) return { user: null };
-  return { user: sanitizeUser(await fetchUser(config, target, PUBLIC_USER_COLUMNS)) };
+  return { user: sanitizeUser(await fetchUser(config, target, PUBLIC_USER_COLUMNS, tenant)) };
 }
 
 // ---------- 邮箱通知 ----------
 
-async function getSiteValues(config) {
-  const rows = await supabase(config, '/site_config?select=key,value&limit=1000', { method: 'GET' });
+async function getSiteValues(config, tenant) {
+  const tid = Number(tenant ? tenant.id : 1);
+  const rows = await supabase(config, `/site_config?tenant_id=eq.${tid}&select=key,value&limit=1000`, { method: 'GET' });
   const m = {};
   for (const r of (rows || [])) m[r.key] = r.value || '';
   return m;
 }
 
-async function setSiteValue(config, key, value) {
-  await supabase(config, '/site_config', { method: 'POST', body: { key, value }, prefer: 'resolution=merge-duplicates' });
+async function setSiteValue(config, key, value, tenant) {
+  const tid = Number(tenant ? tenant.id : 1);
+  await supabase(config, '/site_config', { method: 'POST', body: { tenant_id: tid, key, value }, prefer: 'resolution=merge-duplicates' });
 }
 
-async function setMyEmail(config, username, email) {
+async function setMyEmail(config, username, email, tenant) {
   const value = String(email || '').trim();
   if (value && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)) throw httpError(400, '邮箱格式不正确');
-  await setSiteValue(config, `email_${username}`, value);
+  await setSiteValue(config, `email_${username}`, value, tenant);
   return { ok: true, email: value };
 }
 
@@ -538,14 +585,14 @@ function maskEmail(email) {
   return s.slice(0, 1) + '***' + s.slice(at);
 }
 
-async function getNotifyConfig(config, username) {
+async function getNotifyConfig(config, username, tenant) {
   let m;
-  try { m = await getSiteValues(config); }
+  try { m = await getSiteValues(config, tenant); }
   catch (e) { throw httpError(400, '通知配置表未初始化：请先在 Supabase SQL Editor 运行 site_config 建表 SQL（见管理后台提示）'); }
   const emails = {};
   for (const [k, v] of Object.entries(m)) if (k.startsWith('email_') && v) emails[k.slice(6)] = v;
   const switches = readSwitches(m);
-  const me = await fetchUser(config, username, 'username,role');
+  const me = await fetchUser(config, username, 'username,role', tenant);
   const admin = username === 'admin' || (me && me.role === 'admin');
   // 普通用户只需拿到自己的邮箱与开关，不下发 EmailJS 凭证与全员邮箱，避免被拿去刷配额
   if (!admin) return { isAdmin: false, myEmail: emails[username] || '', switches };
@@ -563,13 +610,13 @@ async function getNotifyConfig(config, username) {
 
 // 事件通知：仅 boy/girl 发布时，把通知发给"对方"。管理员、测试账号等不发送；
 // 对方未绑定邮箱、开关关闭、EmailJS 未配置时静默跳过，不占用免费额度。
-async function sendNotify(config, username, body) {
+async function sendNotify(config, username, body, tenant) {
   const kind = String(body.kind || '');
   if (!['feed', 'message', 'like'].includes(kind)) return { ok: true, sent: false, reason: 'unknown_kind' };
   if (!isCouplePair(username)) return { ok: true, sent: false, reason: 'not_couple' };
 
   let m;
-  try { m = await getSiteValues(config); }
+  try { m = await getSiteValues(config, tenant); }
   catch (e) { return { ok: true, sent: false, reason: 'config_unavailable' }; }
 
   const sw = readSwitches(m);
@@ -611,38 +658,38 @@ async function sendNotify(config, username, body) {
   return { ok: true, sent: true, to: maskEmail(to) };
 }
 
-async function setNotifySwitches(config, body) {
+async function setNotifySwitches(config, body, tenant) {
   const map = { enabled: 'notify_enabled', feed: 'notify_feed', message: 'notify_message', like: 'notify_like' };
   const out = {};
   for (const [k, kv] of Object.entries(map)) {
-    if (body[k] !== undefined) { const v = body[k] ? '1' : '0'; await setSiteValue(config, kv, v); out[k] = !!body[k]; }
+    if (body[k] !== undefined) { const v = body[k] ? '1' : '0'; await setSiteValue(config, kv, v, tenant); out[k] = !!body[k]; }
   }
   return { ok: true, switches: out };
 }
 
 // 管理员为指定账号设置/清空通知邮箱（用于后台直接绑定 boy/girl 的收件邮箱）
-async function setUserEmail(config, body) {
+async function setUserEmail(config, body, tenant) {
   const target = cleanUsername(body.username);
   if (!target) throw httpError(400, '请选择要设置邮箱的账号');
-  const user = await fetchUser(config, target, 'username');
+  const user = await fetchUser(config, target, 'username', tenant);
   if (!user) throw httpError(404, '账号不存在');
   const email = String(body.email || '').trim();
   if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw httpError(400, '邮箱格式不正确');
-  await setSiteValue(config, 'email_' + target, email);
+  await setSiteValue(config, 'email_' + target, email, tenant);
   return { ok: true, username: target, email };
 }
 
-async function setNotifyConfig(config, username, body) {
+async function setNotifyConfig(config, username, body, tenant) {
   const keys = { publicKey: 'emailjs_public_key', serviceId: 'emailjs_service_id', templateId: 'emailjs_template_id' };
   for (const [k, kv] of Object.entries(keys)) {
-    await setSiteValue(config, kv, String(body[k] || ''));
+    await setSiteValue(config, kv, String(body[k] || ''), tenant);
   }
   return { ok: true };
 }
 
-async function testNotify(config, username, body) {
+async function testNotify(config, username, body, tenant) {
   let m;
-  try { m = await getSiteValues(config); }
+  try { m = await getSiteValues(config, tenant); }
   catch (e) { throw httpError(400, '通知配置表未初始化：请先执行 site_config 建表 SQL'); }
   const publicKey = m.emailjs_public_key, serviceId = m.emailjs_service_id, templateId = m.emailjs_template_id;
   if (!publicKey || !serviceId || !templateId) throw httpError(400, '请先填写完整的 EmailJS 配置（公钥 / 服务ID / 模板ID）');
@@ -667,40 +714,44 @@ async function testNotify(config, username, body) {
   return { ok: true, to };
 }
 
-async function logout(config, username) {
-  await patchUser(config, username, { is_online: false, last_active: new Date().toISOString() });
+async function logout(config, username, tenant) {
+  await patchUser(config, username, { is_online: false, last_active: new Date().toISOString() }, tenant);
   return { ok: true };
 }
 
-async function requireAdminThen(config, username, fn) {
-  const user = await fetchUser(config, username, PUBLIC_USER_COLUMNS);
+async function requireAdminThen(config, username, fn, tenant) {
+  const user = await fetchUser(config, username, PUBLIC_USER_COLUMNS, tenant);
   if (!user || !(username === 'admin' || user.role === 'admin')) throw httpError(403, '无权限：只有管理员可以操作这里');
   return fn();
 }
 
-async function getPublicUser(config, username) {
-  const user = await fetchUser(config, username, PUBLIC_USER_COLUMNS);
+async function getPublicUser(config, username, tenant) {
+  const user = await fetchUser(config, username, PUBLIC_USER_COLUMNS, tenant);
   if (!user) throw httpError(401, '登录已失效，请重新登录');
   return sanitizeUser(user);
 }
 
-async function fetchUser(config, username, columns) {
-  const rows = await supabase(config, `/users?username=eq.${encodeURIComponent(username)}&select=${encodeURIComponent(columns)}&limit=1`, { method: 'GET' });
+async function fetchUser(config, username, columns, tenant) {
+  const tid = Number(tenant ? tenant.id : 1);
+  const rows = await supabase(config, `/users?tenant_id=eq.${tid}&username=eq.${encodeURIComponent(username)}&select=${encodeURIComponent(columns)}&limit=1`, { method: 'GET' });
   return rows && rows[0] ? rows[0] : null;
 }
 
-async function insertUser(config, row) {
-  const rows = await supabase(config, '/users', { method: 'POST', body: row, prefer: 'return=representation' });
-  return rows && rows[0] ? rows[0] : row;
+async function insertUser(config, row, tenant) {
+  const tid = Number(tenant ? tenant.id : 1);
+  const body = { ...row, tenant_id: tid };
+  const rows = await supabase(config, '/users', { method: 'POST', body, prefer: 'return=representation' });
+  return rows && rows[0] ? rows[0] : body;
 }
 
-async function patchUser(config, username, patch) {
-  const rows = await supabase(config, `/users?username=eq.${encodeURIComponent(username)}`, { method: 'PATCH', body: patch, prefer: 'return=representation' });
+async function patchUser(config, username, patch, tenant) {
+  const tid = Number(tenant ? tenant.id : 1);
+  const rows = await supabase(config, `/users?tenant_id=eq.${tid}&username=eq.${encodeURIComponent(username)}`, { method: 'PATCH', body: patch, prefer: 'return=representation' });
   return rows && rows[0] ? rows[0] : { username, ...patch };
 }
 
-async function updatePassword(config, username, password) {
-  await patchUser(config, username, { ...(await buildPasswordFields(config, password)), password_updated_at: new Date().toISOString() });
+async function updatePassword(config, username, password, tenant) {
+  await patchUser(config, username, { ...(await buildPasswordFields(config, password)), password_updated_at: new Date().toISOString() }, tenant);
 }
 
 async function buildPasswordFields(config, password) {
@@ -725,7 +776,7 @@ async function legacyHash(config, password, salt) {
   return `sha256$${salt}$${arrayBufferToHex(digest)}`;
 }
 
-async function verifyPassword(config, password, user) {
+async function verifyPassword(config, password, user, tenant) {
   if (user.password_hash && user.password_salt) {
     const stored = String(user.password_hash);
     if (stored.startsWith('pbkdf2$')) {
@@ -737,7 +788,7 @@ async function verifyPassword(config, password, user) {
     if (stored.startsWith('sha256$')) {
       if (!constantTimeEqual(await legacyHash(config, password, user.password_salt), stored)) return false;
       // 透明升级为 PBKDF2（不阻断登录；失败静默）
-      try { await updatePassword(config, user.username, password); } catch (e) {}
+      try { await updatePassword(config, user.username, password, tenant); } catch (e) {}
       return true;
     }
     return false;
@@ -785,9 +836,9 @@ async function supabase(config, path, options) {
 }
 
 // 共享会话实现（HMAC + 过期 + users 存活校验）；本地包装成 401 httpError，保持原行为
-async function requireSession(config, token) {
+async function requireSession(config, token, tenant) {
   try {
-    return await sharedRequireSession(config, token);
+    return await sharedRequireSession(config, token, tenant);
   } catch (e) {
     throw httpError(401, '登录已失效，请重新登录');
   }

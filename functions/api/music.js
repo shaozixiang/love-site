@@ -3,6 +3,9 @@
 // resolve：酷我 rid → 实时获取完整 mp3 直链并 302 重定向（每次新鲜签名，永不过期、永不截断）
 // play：网易云外链代理（仅回退链路使用）
 // 登录态：search 需要有效会话（防滥用）；resolve/play 免登录（登录页未登录时也要播放）
+import { getConfig, requireSession } from '../_lib/session.js';
+import { resolveTenant } from '../_lib/tenant.js';
+
 const NETEASE_SEARCH = 'https://music.163.com/api/search/get/web';
 const NETEASE_OUTER = 'https://music.163.com/song/media/outer/url';
 const KUWO_SEARCH = 'https://search.kuwo.cn/r.s';
@@ -43,8 +46,12 @@ async function handle({ request, env }) {
 
   const needLogin = action === 'search';
   if (needLogin) {
+    const authConfig = getConfig(env);
+    if (!authConfig.ok) return json({ error: authConfig.error }, 500);
+    const currentTenant = await resolveTenant(request, authConfig);
     const sessionToken = request.headers.get('X-Couple-Token') || (url.searchParams.get('sessionToken') || '');
-    if (!sessionToken) return json({ error: '需要登录后才能搜索音乐' }, 401);
+    try { await requireSession(authConfig, sessionToken, currentTenant); }
+    catch (e) { return json({ error: '需要登录后才能搜索音乐' }, 401); }
   }
 
   if (action === 'search') {    if (!keyword || String(keyword).trim().length < 1) return json({ error: '请输入歌名' }, 400);

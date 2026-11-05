@@ -9,6 +9,7 @@ import {
   requireSession, checkAllowedOrigin, corsHeaders, jsonResponse,
   readCookie, randomHex
 } from '../_lib/session.js';
+import { resolveTenant } from '../_lib/tenant.js';
 
 const MAX_IMAGE_BYTES = 10 * 1024 * 1024;   // 普通图片 10MB
 const MAX_GIF_HEIC_BYTES = 20 * 1024 * 1024; // 动图(GIF)/实况照片(HEIC) 20MB（Git Data base64 ≤100MB 以内）
@@ -67,7 +68,8 @@ export async function onRequest(context) {
   };
   const token = readCookie(request.headers.get('Cookie') || '', 'couple_t') || request.headers.get('X-Couple-Token') || '';
   let session;
-  try { session = await requireSession(sessionConfig, token); }
+  const tenant = await resolveTenant(request, sessionConfig);
+  try { session = await requireSession(sessionConfig, token, tenant); }
   catch (e) { return jsonResponse({ error: '请先登录后再上传。' }, 401, headers); }
 
   const ghToken = env.GITHUB_TOKEN;
@@ -114,7 +116,7 @@ export async function onRequest(context) {
     if (folder === 'loginbg') {
       let allowed = session && (session.username === 'admin');
       try {
-        const adminResp = await fetch(`${sessionConfig.supabaseUrl}/rest/v1/users?select=role&username=eq.${encodeURIComponent(session.username)}&limit=1`, {
+        const adminResp = await fetch(`${sessionConfig.supabaseUrl}/rest/v1/users?select=role&tenant_id=eq.${tenant.id}&username=eq.${encodeURIComponent(session.username)}&limit=1`, {
           headers: { apikey: sessionConfig.serviceKey, Authorization: `Bearer ${sessionConfig.serviceKey}` }
         });
         const rows = await adminResp.json().catch(() => null);
@@ -122,7 +124,7 @@ export async function onRequest(context) {
       } catch (e) {}
       if (!allowed) {
         try {
-          const cfgResp = await fetch(`${sessionConfig.supabaseUrl}/rest/v1/login_bg_config?select=authorized_users&limit=1`, {
+          const cfgResp = await fetch(`${sessionConfig.supabaseUrl}/rest/v1/login_bg_config?select=authorized_users&tenant_id=eq.${tenant.id}&limit=1`, {
             headers: { apikey: sessionConfig.serviceKey, Authorization: `Bearer ${sessionConfig.serviceKey}` }
           });
           const cfgRows = await cfgResp.json().catch(() => null);
@@ -136,7 +138,9 @@ export async function onRequest(context) {
     }
     const datedFolder = new Date().toISOString().slice(0, 7);
     const objectName = `${Date.now()}-${randomHex(4)}.${extension}`;
-    const githubPath = `${folder}/${datedFolder}/${objectName}`;
+    // 租户对象统一放 t/<slug>/ 前缀；根站保持原路径
+    const tenantPrefix = Number(tenant.id) === 1 ? '' : `t/${tenant.slug}/`;
+    const githubPath = `${tenantPrefix}${folder}/${datedFolder}/${objectName}`;
     const encodedPath = githubPath.split('/').map(encodeURIComponent).join('/');
     const content = arrayBufferToBase64(arrayBuffer);
 
@@ -195,7 +199,14 @@ export async function onRequest(context) {
       try {
         const proto = new URL(request.url).protocol || 'https:';
         const host = request.headers.get('Host') || '';
-        fetch(`${proto}//${host}${proxyUrl}`, { headers: { 'Range': 'bytes=0-' } }).catch(() => {});
+        // 补租户头，使 img 代理归属校验通过（loginbg 免登录）
+        fetch(`${proto}//${host}${proxyUrl}`, {
+          headers: {
+            'Range': 'bytes=0-',
+            'X-Tenant-Id': String(tenant.id),
+            'X-Tenant-Slug': tenant.slug
+          }
+        }).catch(() => {});
       } catch (e) {}
     }
 

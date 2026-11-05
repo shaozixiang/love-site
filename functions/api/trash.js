@@ -13,6 +13,7 @@ import {
   getConfig as baseConfig, requireSession, checkAdmin,
   checkAllowedOrigin, corsHeaders, jsonResponse, readCookie, authHeaders
 } from '../_lib/session.js';
+import { resolveTenant } from '../_lib/tenant.js';
 
 // 各内容表配置：type 中文名、title 摘要、medias 提取媒体 URL 列表
 const TABLES = {
@@ -40,6 +41,7 @@ export async function onRequest(context) {
   try {
     const cfg = getConfig(env);
     if (!cfg.ok) return jsonResponse({ error: cfg.error }, 500);
+    const tenant = await resolveTenant(request, cfg);
 
     const body = await request.json().catch(() => ({}));
     const action = String(body.action || '');
@@ -48,17 +50,17 @@ export async function onRequest(context) {
     const token = request.headers.get('X-Couple-Token') || readCookie(request.headers.get('Cookie') || '', 'couple_t');
 
     let session;
-    try { session = await requireSession(cfg, token); }
+    try { session = await requireSession(cfg, token, tenant); }
     catch (e) { return jsonResponse({ error: '未登录或登录已失效，请重新登录' }, 401); }
 
-    const isAdmin = await checkAdmin(cfg, session.username);
+    const isAdmin = await checkAdmin(cfg, session.username, tenant);
 
     // ---------- 列表（管理员，不需要 table 参数） ----------
     if (action === 'list') {
       if (!isAdmin) return jsonResponse({ error: '仅管理员可查看回收站' }, 403);
       const out = [];
       for (const [t, conf] of Object.entries(TABLES)) {
-        const rows = await sbQuery(cfg, `${t}?select=*&deleted_at=not.is.null&order=deleted_at.desc&limit=200`);
+        const rows = await sbQuery(cfg, `${t}?select=*&tenant_id=eq.${tenant.id}&deleted_at=not.is.null&order=deleted_at.desc&limit=200`);
         if (!Array.isArray(rows)) continue;
         for (const r of rows) {
           out.push({
@@ -68,7 +70,9 @@ export async function onRequest(context) {
             title: String(conf.title(r) || '').slice(0, 120),
             media: conf.medias(r).map(u => {
               const rel = relFromUrl(u);
-              return rel ? { rel, trashUrl: '/api/img/trash/' + rel, isVideo: /\.(mp4|mov|webm|avi)$/i.test(rel) } : null;
+              if (!rel) return null;
+              const tRel = deletedPath(rel, tenant);
+              return { rel: tRel, trashUrl: '/api/img/' + tRel, isVideo: /\.(mp4|mov|webm|avi)$/i.test(rel) };
             }).filter(Boolean)
           });
         }
@@ -80,8 +84,8 @@ export async function onRequest(context) {
     if (!TABLES[table]) return jsonResponse({ error: '未知的数据模块' }, 400);
     if (!id) return jsonResponse({ error: '缺少记录 ID' }, 400);
 
-    // 取目标记录
-    const rows = await sbQuery(cfg, `${table}?select=*&id=eq.${encodeURIComponent(id)}&limit=1`);
+    // 取目标记录（限定租户）
+    const rows = await sbQuery(cfg, `${table}?select=*&tenant_id=eq.${tenant.id}&id=eq.${encodeURIComponent(id)}&limit=1`);
     if (!Array.isArray(rows) || rows.length === 0) return jsonResponse({ error: '记录不存在' }, 404);
     const row = rows[0];
     const rels = [...new Set(TABLES[table].medias(row).map(relFromUrl).filter(Boolean))];
@@ -93,23 +97,23 @@ export async function onRequest(context) {
       // 先移动文件，成功后再写删除标记，保证一致性
       let moved = 0;
       if (rels.length) {
-        const pairs = rels.map(rel => ({ from: rel, to: 'trash/' + rel }));
+        const pairs = rels.map(rel => ({ from: rel, to: deletedPath(rel, tenant) }));
         const r = await gitMove(cfg, pairs);
         if (!r.ok) return jsonResponse({ error: '图片移入回收站失败：' + r.error }, 502);
         moved = r.moved;
         // 文件已移动：顺手清掉 img 代理边缘缓存，原路径尽快返回 404（P1-05）
-        await purgeImgCache(rels.map(rel => '/' + rel).concat(rels.map(rel => '/trash/' + rel)));
+        await purgeImgCache(rels.map(rel => '/' + rel).concat(rels.map(rel => '/' + deletedPath(rel, tenant))));
       }
-      const patched = await sbExec(cfg, `${table}?id=eq.${encodeURIComponent(id)}`, {
+      const patched = await sbExec(cfg, `${table}?tenant_id=eq.${tenant.id}&id=eq.${encodeURIComponent(id)}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json', Prefer: 'return=minimal' },
         body: JSON.stringify({ deleted_at: new Date().toISOString(), deleted_by: session.username })
       });
       if (!patched.ok) {
         // 单侧失败：文件已进 trash 但 DB 未打标 → 补写可追踪告警，不阻断主流程
-        await compensate(cfg, 'delete_patch_failed', table, id, rels, session.username, request);
+        await compensate(cfg, 'delete_patch_failed', table, id, rels, session.username, request, tenant);
       }
-      await trashLog(cfg, '移入回收站·' + TABLES[table].type, session.username, { module: table, id, files: rels.length, title: String(TABLES[table].title(row) || '').slice(0, 60) }, request);
+      await trashLog(cfg, '移入回收站·' + TABLES[table].type, session.username, { module: table, id, files: rels.length, title: String(TABLES[table].title(row) || '').slice(0, 60) }, request, tenant);
       return jsonResponse({ ok: true, moved }, 200);
     }
 
@@ -119,39 +123,39 @@ export async function onRequest(context) {
     if (action === 'restore') {
       if (!row.deleted_at) return jsonResponse({ ok: true, already: true });
       if (rels.length) {
-        const pairs = rels.map(rel => ({ from: 'trash/' + rel, to: rel }));
+        const pairs = rels.map(rel => ({ from: deletedPath(rel, tenant), to: rel }));
         const r = await gitMove(cfg, pairs);
         if (!r.ok) return jsonResponse({ error: '图片恢复失败：' + r.error }, 502);
-        await purgeImgCache(rels.map(rel => '/' + rel).concat(rels.map(rel => '/trash/' + rel)));
+        await purgeImgCache(rels.map(rel => '/' + rel).concat(rels.map(rel => '/' + deletedPath(rel, tenant))));
       }
-      const restored = await sbExec(cfg, `${table}?id=eq.${encodeURIComponent(id)}`, {
+      const restored = await sbExec(cfg, `${table}?tenant_id=eq.${tenant.id}&id=eq.${encodeURIComponent(id)}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json', Prefer: 'return=minimal' },
         body: JSON.stringify({ deleted_at: null, deleted_by: null })
       });
       if (!restored.ok) {
         // 单侧失败：文件已移回但 DB 仍标删除 → 补写告警
-        await compensate(cfg, 'restore_patch_failed', table, id, rels, session.username, request);
+        await compensate(cfg, 'restore_patch_failed', table, id, rels, session.username, request, tenant);
       }
-      await trashLog(cfg, '从回收站恢复·' + TABLES[table].type, session.username, { module: table, id, files: rels.length }, request);
+      await trashLog(cfg, '从回收站恢复·' + TABLES[table].type, session.username, { module: table, id, files: rels.length }, request, tenant);
       return jsonResponse({ ok: true }, 200);
     }
 
     if (action === 'purge') {
       if (rels.length) {
-        // 文件当前在 trash/ 下；若记录已删则删 trash 副本，若未删（理论上不会）删原文件
+        // 文件当前在租户 trash 路径下；若记录已删则删 trash 副本，若未删（理论上不会）删原文件
         const inTrash = !!row.deleted_at;
-        const targets = rels.map(rel => (inTrash ? 'trash/' + rel : rel));
+        const targets = rels.map(rel => (inTrash ? deletedPath(rel, tenant) : rel));
         const r = await gitDelete(cfg, targets);
         if (!r.ok) return jsonResponse({ error: '文件删除失败：' + r.error }, 502);
-        await purgeImgCache(rels.map(rel => '/' + rel).concat(rels.map(rel => '/trash/' + rel)));
+        await purgeImgCache(rels.map(rel => '/' + rel).concat(rels.map(rel => '/' + deletedPath(rel, tenant))));
       }
-      const deleted = await sbExec(cfg, `${table}?id=eq.${encodeURIComponent(id)}`, { method: 'DELETE' });
+      const deleted = await sbExec(cfg, `${table}?tenant_id=eq.${tenant.id}&id=eq.${encodeURIComponent(id)}`, { method: 'DELETE' });
       if (!deleted.ok) {
         // 单侧失败：文件已删但 DB 行仍在（孤儿行）→ 补写告警
-        await compensate(cfg, 'purge_delete_failed', table, id, rels, session.username, request);
+        await compensate(cfg, 'purge_delete_failed', table, id, rels, session.username, request, tenant);
       }
-      await trashLog(cfg, '彻底删除·' + TABLES[table].type, session.username, { module: table, id, files: rels.length }, request);
+      await trashLog(cfg, '彻底删除·' + TABLES[table].type, session.username, { module: table, id, files: rels.length }, request, tenant);
       return jsonResponse({ ok: true }, 200);
     }
 
@@ -262,6 +266,15 @@ function safeRel(rel) {
   return rel;
 }
 
+// 计算文件移入回收站后的仓库路径
+// 根站：trash/<rel>；租户：t/<slug>/trash/<去掉租户前缀的部分>，保证回收站仍在租户命名空间内
+function deletedPath(rel, tenant) {
+  if (!tenant || Number(tenant.id) === 1) return 'trash/' + rel;
+  const prefix = 't/' + tenant.slug + '/';
+  if (rel.startsWith(prefix)) return prefix + 'trash/' + rel.slice(prefix.length);
+  return 'trash/' + rel;
+}
+
 // ============================================================
 // Supabase 辅助
 // ============================================================
@@ -287,11 +300,12 @@ async function sbExec(cfg, qs, opts = {}) {
 }
 
 // 回收站操作服务端日志（带真实 IP/UA，防伪造；失败静默）
-async function trashLog(cfg, action, username, details, request) {
+async function trashLog(cfg, action, username, details, request, tenant) {
   try {
     const row = {
       action,
       user: username || 'guest',
+      tenant_id: Number(tenant ? tenant.id : 1),
       details: JSON.stringify({
         ...(details || {}),
         ip: request.headers.get('CF-Connecting-IP') || request.headers.get('x-real-ip') || '',
@@ -304,11 +318,11 @@ async function trashLog(cfg, action, username, details, request) {
 }
 
 // P2-03：DB 与 GitHub 单侧失败时补写可追踪告警，不阻断主流程
-async function compensate(cfg, step, table, id, rels, username, request) {
+async function compensate(cfg, step, table, id, rels, username, request, tenant) {
   await trashLog(cfg, 'trash_compensation_needed', username, {
     step, table, id, files: (rels || []).length,
     note: 'DB 与 GitHub 两侧不一致，需人工核对回收站记录'
-  }, request);
+  }, request, tenant);
 }
 
 // P1-05：清掉 /api/img 边缘缓存里受影响的代理 URL（失败静默）
