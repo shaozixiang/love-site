@@ -3,157 +3,162 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <meta name="version" content="20261106ay">
-<script>try{if(!location.search.match(/[?&]v=/)){location.replace(location.pathname+location.hash+'?v=20261106ay');}}catch(e){}</script>
-
     <title>我们的专属小站</title>
+    <meta name="version" content="20261106az">
+<script>try{if(!location.search.match(/[?&]v=/)){location.replace(location.pathname+location.hash+'?v=20261106az');}}catch(e){}</script>
+
     <script>try{var t=localStorage.getItem('couple_theme')||'rose';if(t&&document.documentElement)document.documentElement.setAttribute('data-theme',t);}catch(e){}</script>
-    <link rel="stylesheet" href="assets/love-ui.css?v=20261106ay">
+    <link rel="stylesheet" href="assets/love-ui.css?v=20261106az">
     <link rel="stylesheet" href="/lib/leaflet.css?v=20261011a">
     <script defer src="/lib/leaflet.js?v=20261011a"></script>
-    <script defer src="/lib/supabase.min.js?v=20261011a"></script>
-    <script defer src="/lib/app.js?v=20261106ay"></script>
+    <script defer src="/lib/supabase-v2.js?v=20261011a"></script>
+    <script defer src="/lib/app-v2.js?v=20261106az"></script>
+
     <style>
-    /* ===== 页面专属样式：只允许使用 love-ui.css 的 token，禁止硬编码颜色 ===== */
-    body { overflow-x: hidden; }
+/* ============================================================
+   页面专属样式（仅允许使用 love-ui.css 的 token，不硬编码品牌色）
+   ============================================================ */
 
-    /* 解锁门 */
-    .bubble-layer { position: fixed; inset: 0; z-index: 1000; display: flex; flex-direction: column; justify-content: center; align-items: center; background: linear-gradient(165deg, var(--bg) 0%, var(--tint) 100%); }
-    .bubble-tip { font-size: var(--f-title); font-weight: 650; color: var(--ink); margin-bottom: 16px; letter-spacing: .02em; padding: 0 24px; text-align: center; }
-    .bubble-count { font-size: var(--f-sub); color: var(--rose); background: var(--elev); border: 1px solid var(--line); padding: 6px 18px; border-radius: var(--r-pill); box-shadow: var(--sh-xs); margin-bottom: 30px; }
-    .bubble { position: absolute; background: var(--elev); color: var(--rose); border: 1px solid var(--rose-tint-2); padding: 11px 18px; border-radius: var(--r-pill); font-size: var(--f-sub); font-weight: 600; cursor: pointer; box-shadow: var(--sh-sm); animation: bubbleFloat 3s ease-in-out infinite; }
-    .bubble:active { background: var(--rose); color: #fff; }
-    @keyframes bubbleFloat { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-14px); } }
-    .gate-loading { display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 100%; color: var(--ink-2); gap: 14px; padding: 24px; text-align: center; }
+/* ===== 解锁门 ===== */
+.bubble-layer { position: fixed; inset: 0; z-index: 1000; display: flex; flex-direction: column; justify-content: center; align-items: center; background: var(--bg); }
+.bubble-tip { font-size: var(--f-h3); font-weight: 700; color: var(--rose); margin-bottom: 14px; letter-spacing: .5px; text-align: center; padding: 0 24px; line-height: 1.4; }
+.bubble-count { font-size: var(--f-sub); color: var(--rose); background: var(--rose-tint); padding: 6px 18px; border-radius: 999px; font-weight: 600; }
+.bubble { position: absolute; background: var(--elev); color: var(--rose); border: 1px solid var(--line-2); padding: 10px 18px; border-radius: 999px; font-size: 14px; font-weight: 600; cursor: pointer; animation: bubbleFloat 3s ease-in-out infinite; box-shadow: var(--sh-sm); transition: transform .15s; }
+.bubble::before { content: ''; display: inline-block; width: 11px; height: 11px; margin-right: 6px; vertical-align: -1px; background: center / contain no-repeat url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%23CC4E76'%3E%3Cpath d='M12 21s-7.5-4.9-10-9.2C.3 8.6 2.4 4.5 6.2 4.5c2.2 0 3.7 1.2 4.6 2.6.4.6 1.4.6 1.8 0 .9-1.4 2.4-2.6 4.6-2.6 3.8 0 5.9 4.1 4.2 7.3C19.5 16.1 12 21 12 21z'/%3E%3C/svg%3E"); }
+.bubble:active { transform: scale(.92); }
+@keyframes bubbleFloat { 0%,100%{transform:translateY(0)} 50%{transform:translateY(-14px)} }
+.gate-badge { position: absolute; bottom: calc(30px + env(safe-area-inset-bottom)); font-size: var(--f-caption); color: var(--ink-3); background: var(--elev); border: 1px solid var(--line); padding: 6px 14px; border-radius: 999px; letter-spacing: .06em; }
+.bg-text { position: fixed; color: var(--rose); opacity: .06; font-size: 20px; animation: bgFloat 18s linear infinite; z-index: 0; pointer-events: none; }
+@keyframes bgFloat { 0%{transform:translateY(100vh) rotate(0)} 100%{transform:translateY(-120px) rotate(360deg)} }
 
-    /* 环境漂浮文字 / 弹幕 / 梦幻气泡（纯氛围，不抢视觉） */
-    .bg-text { position: fixed; color: var(--rose); opacity: .06; font-size: 20px; animation: bgFloat 15s linear infinite; z-index: 0; pointer-events: none; }
-    @keyframes bgFloat { 0% { transform: translateY(100vh) rotate(0); } 100% { transform: translateY(-100px) rotate(360deg); } }
-    .danmaku { position: fixed; bottom: -80px; left: 0; width: 100%; text-align: center; font-size: 28px; font-weight: 700; color: var(--rose); opacity: .95; z-index: 20; pointer-events: none; white-space: nowrap; animation: danmakuUp 14s linear forwards; }
-    @keyframes danmakuUp { 0% { bottom: -80px; opacity: 0; transform: scale(.8); } 10% { opacity: 1; transform: scale(1); } 90% { opacity: 1; transform: scale(1); } 100% { bottom: 100%; opacity: 0; transform: scale(1.2); } }
-    .photo-bubble { position: fixed; z-index: 0; pointer-events: none; width: 120px; height: 120px; border-radius: 20px; object-fit: cover; filter: blur(2px) brightness(1.05); opacity: .35; animation: dreamyRotate 24s infinite ease-in-out; }
-    @keyframes dreamyRotate { 0% { transform: translate(0,0) rotate(0) scale(1); opacity: .3; } 25% { transform: translate(8px,-6px) rotate(3deg) scale(1.02); opacity: .4; } 50% { transform: translate(-5px,10px) rotate(6deg) scale(1.05); opacity: .45; } 75% { transform: translate(10px,4px) rotate(3deg) scale(1.02); opacity: .4; } 100% { transform: translate(0,0) rotate(0) scale(1); opacity: .3; } }
+/* ===== 登录页（玫瑰渐变 hero + 白色卡片表单） ===== */
+.login-container { position: fixed; inset: 0; z-index: 999; display: none; overflow-y: auto; background: linear-gradient(165deg, #fdf3f6 0%, #f6e9ef 42%, #e9e2f4 100%); align-items: center; justify-content: center; padding: 24px; }
+.login-inner { width: 100%; max-width: 400px; display: flex; flex-direction: column; gap: 16px; padding: 36px 0 60px; margin: auto 0; }
+.login-hero-card { text-align: center; padding: 30px 22px; }
+.login-hero-card h2 { font-size: var(--f-h2); margin: 12px 0 6px; }
+.hero-heart { width: 58px; height: 58px; margin: 0 auto; border-radius: 19px; background: rgba(255,255,255,.18); display: grid; place-items: center; color: #fff; }
+.login-register-link { margin-top: 14px; text-align: center; font-size: var(--f-sub); color: var(--ink-3); }
+.login-register-link a { margin-left: 4px; font-weight: 600; }
+.login-version { margin-top: 14px; font-size: var(--f-caption); color: var(--ink-3); text-align: center; letter-spacing: .06em; }
 
-    /* 登录页 */
-    #loginPage { position: fixed; inset: 0; z-index: 999; display: none; align-items: center; justify-content: center; background: linear-gradient(165deg, var(--bg) 0%, var(--tint) 100%); padding: 20px; overflow-y: auto; }
-    #mainPage { display: none; }
+/* ===== 主界面骨架 ===== */
+.user-bar { display: flex; align-items: center; gap: 12px; padding: 6px 2px 14px; }
+.user-bar .uname { font-weight: 650; font-size: var(--f-body); color: var(--ink); line-height: 1.2; }
+.user-bar .online-status { font-size: var(--f-mini); color: var(--ink-3); margin-top: 2px; }
+.avatar-wrap { cursor: pointer; }
+.dropdown-menu { position: absolute; top: 48px; right: 0; min-width: 176px; display: none; z-index: 300; overflow: hidden; padding: 4px; }
+.dm-item { display: flex; align-items: center; gap: 10px; width: 100%; padding: 11px 12px; font-size: var(--f-body); color: var(--ink); text-align: left; background: transparent; border-radius: 10px; white-space: nowrap; line-height: 1.4; }
+.dm-item:active { background: var(--soft); }
+.dm-item .lui-icon { width: 18px; height: 18px; color: var(--ink-3); flex: none; }
+.dm-item.danger { color: var(--red); }
+.dm-item.danger .lui-icon { color: var(--red); }
 
-    /* 板块切换 */
-    .section { display: none; }
-    .section.active { display: block; animation: lui-fade-up .3s var(--ease) both; }
+.section { display: none; padding: 2px 0 4px; }
+.section.active { display: block; animation: lui-fade-up .28s var(--ease) both; }
 
-    /* 用户工具下拉 */
-    .dropdown-menu { position: absolute; top: 48px; right: 0; background: var(--elev); border: 1px solid var(--line); border-radius: var(--r-md); box-shadow: var(--sh-lg); z-index: 300; min-width: 176px; overflow: hidden; display: none; padding: 5px; }
-    .dropdown-menu button { width: 100%; display: flex; align-items: center; gap: 9px; padding: 11px 12px; border-radius: 10px; background: none; border: none; text-align: left; font-size: var(--f-sub); color: var(--ink); cursor: pointer; white-space: nowrap; line-height: 1.4; }
-    .dropdown-menu button:active { background: var(--tint); }
-    .dropdown-menu button.danger { color: var(--red); }
-    .dropdown-menu .lui-icon { color: var(--ink-3); width: 18px; height: 18px; flex: none; }
+/* ===== 相册 / 动态 ===== */
+.upload-zone { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; padding: 22px 14px; border: 1.5px dashed var(--line-2); border-radius: var(--r-md); background: var(--rose-tint); color: var(--rose); font-size: var(--f-sub); font-weight: 600; cursor: pointer; margin-bottom: 14px; }
+.upload-zone:active { background: var(--rose-tint-2); }
+.feed-card { margin-bottom: 14px; overflow: hidden; padding: 0; }
+.feed-head { display: flex; align-items: center; gap: 10px; padding: 14px 14px 2px; }
+.feed-head .lui-avatar { background: var(--rose-tint); color: var(--rose); }
+.feed-author { font-weight: 650; font-size: var(--f-body); line-height: 1.2; }
+.feed-time { font-size: var(--f-caption); color: var(--ink-3); margin-top: 1px; }
+.feed-desc { padding: 6px 14px 10px; font-size: var(--f-body); line-height: 1.6; word-break: break-word; }
+.feed-grid { display: grid; grid-template-columns: repeat(3,1fr); gap: 5px; padding: 4px 12px 8px; }
+.grid-cell { aspect-ratio: 1; border-radius: 10px; overflow: hidden; position: relative; background: var(--soft); cursor: pointer; }
+.grid-cell.single { grid-column: span 3; aspect-ratio: auto; max-height: 340px; }
+.grid-cell img, .grid-cell video { width: 100%; height: 100%; object-fit: cover; display: block; }
+.feed-actions { display: flex; align-items: center; gap: 8px; padding: 10px 14px; border-top: 1px solid var(--line); flex-wrap: wrap; }
+.like-btn { display: inline-flex; align-items: center; gap: 6px; height: 32px; padding: 0 13px; border-radius: 999px; background: var(--soft); color: var(--ink-2); font-size: var(--f-sub); font-weight: 600; transition: all var(--t-fast) var(--ease); }
+.like-btn.liked { background: var(--rose); color: #fff; }
+.like-btn .lui-icon { width: 15px; height: 15px; }
+.like-users { display: flex; flex-wrap: wrap; gap: 4px; margin-left: auto; align-items: center; font-size: var(--f-caption); color: var(--ink-3); }
+.like-tag { background: var(--rose-tint); color: var(--rose); padding: 2px 8px; border-radius: 999px; font-size: var(--f-caption); }
+.like-count { font-weight: 700; color: var(--rose); }
+.feed-comments { padding: 8px 14px 12px; font-size: var(--f-sub); }
+.comment-item { margin-bottom: 6px; color: var(--ink-2); line-height: 1.55; word-break: break-word; }
+.comment-item strong { color: var(--rose); font-weight: 650; margin-right: 2px; }
+.reply-row { display: flex; gap: 8px; align-items: center; margin-top: 8px; }
+.reply-row input { flex: 1; background: var(--soft); border: none; outline: none; border-radius: 999px; padding: 9px 14px; font-size: var(--f-sub); color: var(--ink); min-width: 0; }
+.reply-row button { background: var(--rose-tint); color: var(--rose); border: none; border-radius: 999px; padding: 9px 16px; font-size: var(--f-sub); font-weight: 600; flex: none; }
 
-    /* 相册媒体网格 / 评论行 */
-    .feed-media { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin: 10px 0; }
-    .feed-media-item { border-radius: var(--r-sm); overflow: hidden; aspect-ratio: 1; background: var(--soft); cursor: pointer; }
-    .feed-media-item img, .feed-media-item video { width: 100%; height: 100%; object-fit: cover; }
-    .comment-item { font-size: var(--f-sub); color: var(--ink-2); padding: 5px 0; line-height: 1.55; }
-    .comment-item strong { color: var(--rose); font-weight: 600; }
-    .reply-row { display: flex; gap: 8px; margin-top: 8px; align-items: center; }
-    .reply-row input { flex: 1; background: var(--soft); border: 1px solid transparent; border-radius: var(--r-pill); padding: 8px 14px; font-size: var(--f-sub); outline: none; color: var(--ink); }
-    .like-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 10px; }
-    .like-users { display: flex; gap: 6px; flex-wrap: wrap; font-size: var(--f-mini); color: var(--ink-3); align-items: center; }
-    .like-user-tag { background: var(--rose-tint); color: var(--rose); padding: 2px 9px; border-radius: var(--r-pill); }
-    .heart-pop { animation: heartPop .6s ease; }
-    @keyframes heartPop { 0% { transform: scale(1); } 20% { transform: scale(1.45); } 40% { transform: scale(.9); } 60% { transform: scale(1.25); } 80% { transform: scale(1.05); } 100% { transform: scale(1); } }
+/* ===== 留言 / 回忆 / 感动等列表卡 ===== */
+.msg-card { margin-bottom: 12px; }
+.msg-content { font-size: var(--f-body); line-height: 1.65; word-break: break-word; }
+.msg-photo { width: 100%; max-height: 340px; object-fit: cover; border-radius: var(--r-sm); margin-top: 10px; cursor: pointer; }
+.list-meta { display: flex; align-items: center; gap: 8px; margin-top: 10px; font-size: var(--f-caption); color: var(--ink-3); flex-wrap: wrap; }
+.who { display: inline-flex; align-items: center; gap: 6px; font-weight: 600; color: var(--ink-2); }
+.priority-dot { display: inline-flex; align-items: center; padding: 2px 10px; border-radius: 999px; font-size: 11px; font-weight: 600; }
+.p-normal { background: var(--soft); color: var(--ink-2); }
+.p-important { background: var(--amber-tint); color: var(--amber); }
+.p-urgent { background: var(--red-tint); color: var(--red); }
+.done-strike { opacity: .55; }
+.done-strike .msg-content { text-decoration: line-through; }
+.memo-row { display: flex; align-items: flex-start; gap: 10px; }
+.memo-row input[type=checkbox] { width: 20px; height: 20px; accent-color: var(--rose); flex: none; margin-top: 2px; }
+.private-badge { display: inline-flex; align-items: center; gap: 3px; background: var(--amber-tint); color: var(--amber); padding: 2px 9px; border-radius: 999px; font-size: 10px; font-weight: 600; margin-left: 8px; vertical-align: middle; }
 
-    /* 相册选图预览 */
-    .preview-images { display: flex; flex-wrap: wrap; gap: 10px; margin: 4px 0 12px; }
-    .preview-img { width: 76px; height: 76px; object-fit: cover; border-radius: var(--r-sm); border: 1px solid var(--line); cursor: pointer; }
+/* ===== 行程 / 倒计时 ===== */
+.schedule-item { background: var(--elev); border: 1px solid var(--line); border-radius: var(--r-md); padding: 14px; margin-bottom: 10px; box-shadow: var(--sh-xs); }
+.schedule-date { font-weight: 650; color: var(--rose); font-size: var(--f-sub); margin-bottom: 4px; display: flex; align-items: center; gap: 6px; }
+.schedule-date .lui-icon { width: 15px; height: 15px; }
+.countdown-item { background: var(--elev); border: 1px solid var(--line); border-radius: var(--r-md); padding: 14px; margin-bottom: 10px; display: flex; justify-content: space-between; align-items: center; gap: 8px; box-shadow: var(--sh-xs); }
+.countdown-status { font-weight: 650; color: var(--rose); font-size: var(--f-sub); white-space: nowrap; }
 
-    /* 上传虚框 */
-    .upload-zone { border: 1.5px dashed var(--rose-3); border-radius: var(--r-md); padding: 20px; text-align: center; cursor: pointer; color: var(--rose); font-weight: 600; font-size: var(--f-sub); display: flex; flex-direction: column; align-items: center; gap: 8px; }
-    .upload-zone:active { background: var(--rose-tint); }
+/* ===== 地图 ===== */
+.map-container { width: 100%; height: 380px; border-radius: var(--r-md); overflow: hidden; background: var(--soft); z-index: 1; }
+.map-marker-item { background: var(--elev); border: 1px solid var(--line); border-radius: var(--r-md); padding: 12px 14px; margin-bottom: 8px; display: flex; justify-content: space-between; align-items: center; gap: 8px; box-shadow: var(--sh-xs); }
 
-    /* 地图 */
-    .map-container { width: 100%; height: 380px; border-radius: var(--r-md); overflow: hidden; margin: 4px 0 14px; z-index: 1; }
+/* ===== 图片 / 视频查看器 ===== */
+.image-modal, .video-modal { display: none; position: fixed; inset: 0; background: rgba(12,9,11,.94); z-index: 10000; justify-content: center; align-items: center; }
+.modal-content img, .modal-content video { max-width: 92vw; max-height: 82vh; border-radius: 14px; object-fit: contain; }
+.close-x { position: absolute; top: calc(16px + env(safe-area-inset-top)); right: 20px; width: 42px; height: 42px; border-radius: 50%; background: rgba(255,255,255,.16); color: #fff; display: grid; place-items: center; z-index: 10010; cursor: pointer; border: none; }
+.nav-arrow { position: absolute; top: 50%; transform: translateY(-50%); background: rgba(255,255,255,.16); color: #fff; border: 1px solid rgba(255,255,255,.25); width: 44px; height: 44px; border-radius: 50%; display: grid; place-items: center; z-index: 10005; backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); }
+.nav-arrow.left { left: 10px; }
+.nav-arrow.right { right: 10px; }
+.download-btn { display: inline-flex; align-items: center; gap: 6px; margin: 14px auto 0; background: var(--rose); color: #fff; border: none; padding: 10px 26px; border-radius: 999px; font-size: var(--f-sub); font-weight: 600; cursor: pointer; }
+.download-btn .lui-icon { width: 16px; height: 16px; }
 
-    /* 大图 / 视频查看器 */
-    #imageModal, #videoModal { position: fixed; inset: 0; background: rgba(12, 7, 10, .94); z-index: 10000; display: none; align-items: center; justify-content: center; }
-    .close-x { position: absolute; top: calc(14px + env(safe-area-inset-top)); right: 18px; color: #fff; background: rgba(255,255,255,.14); border: 1px solid rgba(255,255,255,.25); width: 40px; height: 40px; border-radius: 50%; display: flex; align-items: center; justify-content: center; cursor: pointer; z-index: 10010; }
-    .nav-arrow { position: absolute; top: 50%; transform: translateY(-50%); width: 44px; height: 44px; border-radius: 50%; background: rgba(255,255,255,.14); border: 1px solid rgba(255,255,255,.25); color: #fff; display: flex; align-items: center; justify-content: center; cursor: pointer; z-index: 10005; }
-    .nav-arrow.left { left: 10px; } .nav-arrow.right { right: 10px; }
-    #modalImage { max-width: 92vw; max-height: 76vh; border-radius: var(--r-md); object-fit: contain; }
-    #modalVideo { max-width: 92vw; max-height: 80vh; border-radius: var(--r-md); }
+/* ===== 气泡设置 ===== */
+.photo-list-preview { display: flex; flex-wrap: wrap; gap: 10px; margin: 14px 0; max-height: 190px; overflow-y: auto; }
+.preview-item { position: relative; width: 68px; height: 68px; border-radius: 12px; overflow: hidden; border: 1px solid var(--line-2); }
+.preview-item img { width: 100%; height: 100%; object-fit: cover; }
+.remove-photo { position: absolute; top: 2px; right: 2px; background: rgba(0,0,0,.55); color: #fff; border-radius: 50%; width: 18px; height: 18px; font-size: 11px; display: grid; place-items: center; cursor: pointer; border: none; }
+.photo-bubble { position: fixed; z-index: 1; pointer-events: none; width: 120px; height: 120px; border-radius: 20px; object-fit: cover; filter: blur(2px) brightness(1.05); opacity: .35; animation: dreamyRotate 24s infinite ease-in-out; }
+@keyframes dreamyRotate { 0%{transform:translate(0,0) rotate(0) scale(1);opacity:.3} 25%{transform:translate(8px,-6px) rotate(3deg) scale(1.02);opacity:.4} 50%{transform:translate(-5px,10px) rotate(6deg) scale(1.05);opacity:.45} 75%{transform:translate(10px,4px) rotate(3deg) scale(1.02);opacity:.4} 100%{transform:translate(0,0) rotate(0) scale(1);opacity:.3} }
 
-    /* 管理后台全屏覆盖 */
-    #adminPanel .lui-shell-admin { overflow-y: auto; min-height: 100%; }
+/* ===== 弹幕 / 底部标识 ===== */
+.danmaku { position: fixed; bottom: -80px; left: 0; width: 100%; text-align: center; font-size: 28px; font-weight: 800; color: var(--rose); opacity: .95; z-index: 20; pointer-events: none; white-space: nowrap; animation: danmakuUp 14s linear forwards; }
+@keyframes danmakuUp { 0%{bottom:-80px;opacity:0;transform:scale(.8)} 10%{opacity:1;transform:scale(1)} 90%{opacity:1;transform:scale(1)} 100%{bottom:100%;opacity:0;transform:scale(1.2)} }
+.footer-tag { text-align: center; font-size: var(--f-caption); color: var(--ink-3); padding: 18px 0 26px; letter-spacing: .06em; }
 
-    /* 待办未勾选空方框 */
-    .todo-box { display: inline-block; width: 18px; height: 18px; border: 2px solid var(--line-2); border-radius: 6px; vertical-align: middle; }
-    /* 删除类按钮文字收红 */
-    .danger-text { color: var(--red); }
-    /* 已喜欢状态 */
-    .lui-btn.liked { color: var(--rose); background: var(--rose-tint); }
-    
-    input[type=file] { width: 100%; font-size: var(--f-sub); color: var(--ink-3); background: var(--soft); border-radius: var(--r-sm); padding: 9px 10px; }
-    input[type=file]::file-selector-button { background: var(--elev); color: var(--rose); border: 1px solid var(--rose-3); border-radius: var(--r-pill); padding: 6px 14px; font-weight: 600; margin-right: 10px; cursor: pointer; font-size: var(--f-sub); }
+/* ===== 小头像 / 对外隐藏按钮 ===== */
+.avatar-xs { width: 22px; height: 22px; border-radius: 50%; object-fit: cover; vertical-align: -5px; margin-right: 2px; border: 1px solid var(--line-2); }
+.vis-btn { display: inline-flex; align-items: center; gap: 4px; background: var(--soft); color: var(--ink-2); border: none; border-radius: 999px; padding: 5px 11px; font-size: 12px; font-weight: 600; cursor: pointer; margin-left: 6px; }
+.vis-btn.is-hidden { background: var(--amber-tint); color: var(--amber); }
+.vis-badge { display: inline-flex; background: var(--amber-tint); color: var(--amber); border-radius: 999px; padding: 3px 9px; font-size: 11px; font-weight: 600; margin-left: 6px; align-items: center; gap: 3px; }
 
-    /* 前端管理员可见性小控件 */
-    .vis-btn { display: inline-flex; align-items: center; gap: 4px; background: var(--soft); color: var(--ink-2); border: none; border-radius: var(--r-pill); padding: 5px 11px; font-size: var(--f-mini); font-weight: 600; cursor: pointer; margin-left: 6px; }
-    .vis-btn.is-hidden { background: var(--amber-tint); color: var(--amber); }
-    .vis-badge { display: inline-block; background: var(--amber-tint); color: var(--amber); border-radius: var(--r-pill); padding: 3px 9px; font-size: 10px; font-weight: 600; margin-left: 6px; }
+/* ===== Toast 容器（toast 本体由 LUI 提供；必须全站最顶，否则被全屏查看器/预览/弹层遮挡） ===== */
+#toastBox { position: fixed; inset: 0; pointer-events: none; z-index: 99999; }
 
-    /* ===== 后台旧类名兼容层（仅 token，不新增颜色） ===== */
-    .admin-section { padding: 2px 0; color: var(--ink-2); font-size: var(--f-sub); }
-    .adm-card { background: var(--card); border: 1px solid var(--line); border-radius: var(--r-lg); padding: 14px 16px; margin-bottom: 12px; }
-    .adm-card h3 { font-size: var(--f-body); font-weight: 650; margin: 0 0 10px; color: var(--ink); }
-    .adm-stat-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; margin: 10px 0; }
-    @media (min-width: 640px) { .adm-stat-grid { grid-template-columns: repeat(4, 1fr); } }
-    .adm-stat { background: var(--soft); border-radius: var(--r-md); padding: 10px; text-align: center; }
-    .adm-stat .num { font-size: 19px; font-weight: 700; color: var(--rose); }
-    .adm-stat .lbl { font-size: var(--f-mini); color: var(--ink-2); margin-top: 3px; }
-    .adm-badge { background: var(--red); color: #fff; border-radius: var(--r-pill); font-size: 10px; font-weight: 700; padding: 1px 7px; margin-left: 4px; }
-    .admin-btn, .adm-ua-btn, .adm-del-btn, .adm-quick button { display: inline-flex; align-items: center; gap: 5px; background: var(--soft); color: var(--ink); border: 1px solid var(--line); border-radius: var(--r-md); padding: 7px 12px; font-size: var(--f-sub); font-weight: 600; cursor: pointer; min-height: 34px; margin: 2px 4px 2px 0; }
-    .adm-del-btn, .admin-btn.danger { color: var(--red); border-color: var(--red-3, var(--line)); }
-    .data-table { width: 100%; border-collapse: collapse; font-size: var(--f-sub); }
-    .data-table th, .data-table td { text-align: left; padding: 9px 10px; border-bottom: 1px solid var(--line); }
-    .data-table th { color: var(--ink-3); font-weight: 600; font-size: var(--f-mini); }
-    .adm-loading, .adm-empty { color: var(--ink-3); font-size: var(--f-sub); padding: 20px 0; text-align: center; }
-    .adm-user { display: flex; align-items: center; gap: 10px; background: var(--card); border: 1px solid var(--line); border-radius: var(--r-md); padding: 10px 12px; margin-bottom: 8px; flex-wrap: wrap; }
-    .adm-user-ava { width: 34px; height: 34px; border-radius: 50%; background: var(--rose-tint); color: var(--rose); display: flex; align-items: center; justify-content: center; font-weight: 700; flex-shrink: 0; }
-    .adm-user-name { font-weight: 650; color: var(--ink); }
-    .adm-user-meta { font-size: var(--f-mini); color: var(--ink-3); }
-    .adm-role-tag { display: inline-block; background: var(--rose-tint); color: var(--rose); border-radius: var(--r-pill); padding: 2px 8px; font-size: 10px; font-weight: 700; }
-    .adm-perm { color: var(--ink-2); font-size: var(--f-mini); }
-    .adm-item { background: var(--card); border: 1px solid var(--line); border-radius: var(--r-md); padding: 10px 12px; margin-bottom: 8px; }
-    .adm-item-text { color: var(--ink); font-size: var(--f-sub); }
-    .adm-item-meta, .adm-log-meta, .adm-log-detail { color: var(--ink-3); font-size: var(--f-mini); margin-top: 4px; }
-    .adm-item-foot, .adm-user-actions { margin-top: 6px; }
-    .adm-log-item { background: var(--soft); border-radius: var(--r-sm); padding: 8px 10px; margin-bottom: 6px; }
-    .adm-log-act { font-weight: 650; color: var(--ink); }
-    .adm-field { margin-bottom: 12px; }
-    .adm-field label { display: block; font-size: var(--f-mini); color: var(--ink-2); margin-bottom: 5px; font-weight: 600; }
-    .adm-chips { display: flex; gap: 8px; flex-wrap: wrap; }
-    .adm-chip { background: var(--soft); border: 1px solid var(--line); border-radius: var(--r-pill); padding: 6px 12px; font-size: var(--f-sub); color: var(--ink-2); cursor: pointer; }
-    .adm-quick { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
-    .submit-btn { display: inline-flex; align-items: center; gap: 5px; background: var(--soft); color: var(--ink); border: 1px solid var(--line); border-radius: var(--r-md); padding: 7px 12px; font-size: var(--f-sub); font-weight: 600; cursor: pointer; min-height: 34px; }
-
-    /* 气泡照片池预览 */
-    .photo-list-preview { display: flex; flex-wrap: wrap; gap: 10px; margin: 12px 0; max-height: 200px; overflow-y: auto; }
-    .preview-item { position: relative; width: 70px; height: 70px; border-radius: var(--r-sm); overflow: hidden; border: 1px solid var(--line); }
-    .preview-item img { width: 100%; height: 100%; object-fit: cover; }
-    .remove-photo { position: absolute; top: 2px; right: 2px; background: rgba(0,0,0,.55); color: #fff; border-radius: 50%; width: 18px; height: 18px; font-size: 11px; line-height: 18px; text-align: center; cursor: pointer; border: none; }
+/* 隐私单选（感动的话） */
+.priv-seg { flex: 1 0 auto; display: inline-flex; align-items: center; justify-content: center; gap: 5px; min-height: 34px; padding: 0 14px; border-radius: 9px; font-size: var(--f-sub); font-weight: 600; color: var(--ink-2); cursor: pointer; }
+.priv-seg input { position: absolute; opacity: 0; pointer-events: none; }
+.priv-seg:has(input:checked) { background: var(--elev); color: var(--ink); box-shadow: var(--sh-xs); }
+.priv-seg .lui-icon { width: 15px; height: 15px; }
     </style>
 </head>
 <body class="lui-glow">
-    <!-- 评分环渐变定义（love-ui.css 引用 url(#luiRingGrad)） -->
-    <svg width="0" height="0" style="position:absolute;">
-        <defs>
-            <linearGradient id="luiRingGrad" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#E87A9E"/><stop offset=".55" stop-color="#CC4E76"/><stop offset="1" stop-color="#B0345C"/></linearGradient>
-        </defs>
-    </svg>
-
-    <!-- ============ 解锁门 ============ -->
-    <div class="bubble-layer" id="bubbleLayer"><div class="bubble-tip">点击 10 个爱心气泡，解锁我们的小站</div><div class="bubble-count">已点击：<span id="bubbleCount">0</span> / 10</div></div>
+<svg width="0" height="0" style="position:absolute;"><defs><linearGradient id="luiRingGrad" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#E87A9E"/><stop offset=".55" stop-color="#CC4E76"/><stop offset="1" stop-color="#B0345C"/></linearGradient></defs></svg>
+    <!-- 解锁门 -->
+    <div class="bubble-layer" id="bubbleLayer">
+        <div class="bubble-tip">点击 10 个爱心气泡，解锁我们的小站</div>
+        <div class="bubble-count">已点击：<span id="bubbleCount">0</span> / 10</div>
+        <div class="gate-badge">我们的专属小站 · 专属优化版</div>
+    </div>
     <script>
-    /* 零依赖爱心门禁：不等待数据库库下载，HTML 一解析就生成气泡，保证秒开 */
+    /* 零依赖爱心门禁：不等待数据库下载，HTML 一解析就生成气泡，保证秒开 */
     (function(){
         var layer = document.getElementById('bubbleLayer');
         if (!layer) return;
@@ -171,13 +176,13 @@
             };
             layer.appendChild(b);
         }
-        var texts = ['我爱你','一直在一起','好好生活','慢慢相爱'];
-        for (var i = 0; i < 25; i++){
+        var texts = ['宝宝我爱你','我超喜欢你','我们要一直在一起','最爱宝宝啦'];
+        for (var i = 0; i < 20; i++){
             (function(){
                 var d = document.createElement('div'); d.className = 'bg-text';
                 d.textContent = texts[Math.floor(Math.random()*4)];
                 d.style.left = Math.random()*100 + '%';
-                d.style.animationDelay = Math.random()*15 + 's';
+                d.style.animationDelay = Math.random()*18 + 's';
                 d.style.fontSize = (16 + Math.random()*16) + 'px';
                 document.body.appendChild(d);
             })();
@@ -191,16 +196,16 @@
                 layer.style.display = 'none';
                 window.unlockEntryGate();
             } else {
-                layer.innerHTML = '<div class="gate-loading"><div class="lui-spinner lg"></div><div>正在进入我们的小站…<br><span style="font-size:13px;color:var(--ink-3);margin-top:6px;display:block;">首次加载请稍候，之后会越来越快</span></div></div>';
+                layer.innerHTML = '<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;color:var(--rose);font-size:20px;font-weight:600;line-height:1.6;">正在进入我们的小站…<br><span style="font-size:14px;color:var(--ink-3);margin-top:10px;">首次加载请稍候，之后会越来越快</span></div>';
             }
         }
         window.__gateUnlock = unlock;
     })();
     </script>
 
-    <!-- ============ 登录页（卡片式） ============ -->
-    <div id="loginPage">
-        <div class="lui-shell" style="display:flex;flex-direction:column;gap:16px;width:100%;max-width:400px;">
+    <!-- 登录页（卡片式） -->
+    <div class="login-container" id="loginPage" style="display:none;">
+        <div style="display:flex;flex-direction:column;gap:16px;width:100%;max-width:400px;">
             <div class="lui-card hero" style="padding:26px 22px;text-align:center;">
                 <div style="display:inline-flex;background:rgba(255,255,255,.2);border:1px solid rgba(255,255,255,.35);border-radius:50%;width:56px;height:56px;align-items:center;justify-content:center;margin-bottom:12px;">
                     <svg class="lui-icon s28" style="color:#fff;"><use href="assets/icons.svg#i-heart"/></svg>
@@ -219,36 +224,187 @@
         </div>
     </div>
 
-    <!-- ============ 主界面 ============ -->
-    <div class="lui-shell" id="mainPage">
-        <div class="lui-page-head">
-            <div class="eyebrow">Our Little Station</div>
-            <h1>我们的专属小站</h1>
-            <div class="sub" id="togetherDaysDisplay"></div>
-        </div>
+    <!-- 主界面 -->
+    <div id="mainPage" style="display:none;">
+      <div class="lui-shell">
+        <div class="lui-body">
+            <!-- 大标题区 -->
+            <div class="lui-page-head">
+                <div class="eyebrow">Our Station</div>
+                <h1>我们的专属小站</h1>
+                <div class="sub" id="togetherDaysDisplay"></div>
+            </div>
 
-        <!-- 用户信息条 -->
-        <div class="lui-card" style="display:flex;align-items:center;gap:12px;margin-bottom:14px;padding:12px 14px;">
-            <div onclick="openAvatarModal()" style="cursor:pointer;display:flex;align-items:center;gap:12px;flex:1;min-width:0;">
-                <img id="userAvatarImg" class="lui-avatar s40 ring" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%23C94C73'%3E%3Cpath d='M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z'/%3E%3C/svg%3E" alt="">
-                <div style="min-width:0;">
-                    <div class="lui-body-text" style="font-weight:650;" id="displayUsername"></div>
-                    <div class="lui-mini" id="onlineStatus" style="margin-top:2px;"></div>
+            <!-- 用户信息条 -->
+            <div class="user-bar">
+                <div class="lui-avatar s48 ring avatar-wrap" onclick="openAvatarModal()">
+                    <img id="userAvatarImg" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%23C94C73'%3E%3Cpath d='M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z'/%3E%3C/svg%3E">
+                </div>
+                <div class="lui-flex-1" style="min-width:0;">
+                    <div class="uname" id="displayUsername"></div>
+                    <div class="online-status" id="onlineStatus"></div>
+                </div>
+                <button class="lui-btn icon sm" id="openBubbleSettingsBtn" title="梦幻气泡"><svg class="lui-icon s18"><use href="assets/icons.svg#i-bubble"/></svg></button>
+                <div class="settings-dropdown" style="position:relative;">
+                    <button class="lui-btn icon sm" onclick="toggleDropdown()"><svg class="lui-icon s18"><use href="assets/icons.svg#i-settings"/></svg></button>
+                    <div class="dropdown-menu lui-list" id="dropdownMenu">
+                        <button class="dm-item" onclick="openEmailModal()"><svg class="lui-icon"><use href="assets/icons.svg#i-mail"/></svg>我的邮箱</button>
+                        <button class="dm-item" onclick="openUsernameModal()"><svg class="lui-icon"><use href="assets/icons.svg#i-pencil"/></svg>修改用户名</button>
+                        <button class="dm-item" onclick="openPasswordModal()"><svg class="lui-icon"><use href="assets/icons.svg#i-lock"/></svg>修改密码</button>
+                        <button class="dm-item" id="adminEntryBtn" style="display:none;" onclick="openAdminPanel()"><svg class="lui-icon"><use href="assets/icons.svg#i-gauge"/></svg>管理后台</button>
+                        <button class="dm-item danger" onclick="logout()"><svg class="lui-icon"><use href="assets/icons.svg#i-log-out"/></svg>退出登录</button>
+                    </div>
                 </div>
             </div>
-            <div class="settings-dropdown" style="position:relative;display:flex;gap:8px;">
-                <button class="lui-btn icon sm" onclick="toggleDropdown()" aria-label="设置"><svg class="lui-icon"><use href="assets/icons.svg#i-settings"/></svg></button>
-                <div class="dropdown-menu" id="dropdownMenu">
-                    <button onclick="openUsernameModal()"><svg class="lui-icon s16"><use href="assets/icons.svg#i-pencil"/></svg>修改用户名</button>
-                    <button onclick="openPasswordModal()"><svg class="lui-icon s16"><use href="assets/icons.svg#i-lock"/></svg>修改密码</button>
-                    <button onclick="openAdminPanel()" id="adminEntryBtn" style="display:none;"><svg class="lui-icon s16"><use href="assets/icons.svg#i-shield-check"/></svg>管理后台</button>
-                    <button class="danger" onclick="logout()"><svg class="lui-icon s16"><use href="assets/icons.svg#i-log-out"/></svg>退出登录</button>
-                </div>
-            </div>
-        </div>
-        <button class="lui-fab" id="openBubbleSettingsBtn" aria-label="梦幻气泡"><svg class="lui-icon"><use href="assets/icons.svg#i-bubble"/></svg></button>
 
-        <!-- 底部浮动坞 -->
+            <!-- 留言板 -->
+            <section class="section active" id="messageSection">
+                <div class="lui-card">
+                    <div class="lui-card-head">
+                        <div class="lui-badge-icon"><svg class="lui-icon"><use href="assets/icons.svg#i-message"/></svg></div>
+                        <div><h3>给TA的悄悄话</h3><div class="sub">写下此刻想说的话</div></div>
+                    </div>
+                    <div class="lui-field"><textarea class="lui-textarea" id="messageInput" placeholder="想对TA说什么…"></textarea></div>
+                    <div class="lui-flex" style="gap:10px; margin-bottom:14px;">
+                        <label class="lui-filepick" for="messagePhotoInput"><svg class="lui-icon s16"><use href="assets/icons.svg#i-photo"/></svg><span class="fp-name" id="messagePhotoName">添加照片（可选）</span><input type="file" id="messagePhotoInput" accept="image/*" onchange="var n=document.getElementById('messagePhotoName');if(n)n.textContent=this.files.length?this.files[0].name:'添加照片（可选）';"></label>
+                        <div id="messagePhotoPreview"></div>
+                    </div>
+                    <button class="lui-btn primary block" id="msgSubmitBtn" onclick="addMessageWithPhoto()"><svg class="lui-icon"><use href="assets/icons.svg#i-send"/></svg>发送留言</button>
+                </div>
+                <div id="messageList"></div>
+            </section>
+
+            <!-- 时光相册 -->
+            <section class="section" id="gallerySection">
+                <div class="lui-card">
+                    <div class="lui-card-head">
+                        <div class="lui-badge-icon"><svg class="lui-icon"><use href="assets/icons.svg#i-photo"/></svg></div>
+                        <div><h3>时光相册</h3><div class="sub">朋友圈模式</div></div>
+                    </div>
+                    <div class="upload-zone" onclick="document.getElementById('fileInput').click()">
+                        <svg class="lui-icon s24"><use href="assets/icons.svg#i-camera"/></svg>
+                        选择照片 / 视频（可多选）
+                        <input type="file" id="fileInput" accept="image/*,video/*" multiple style="display:none">
+                    </div>
+                    <div id="selectedFilesPreview" class="preview-images" style="display:flex; flex-wrap:wrap; gap:10px; margin-bottom:12px;"></div>
+                    <div class="lui-field"><textarea id="feedDesc" class="lui-textarea" placeholder="写一段描述…（选填）"></textarea></div>
+                    <button class="lui-btn primary block" id="feedSubmitBtn" onclick="uploadFeed()"><svg class="lui-icon"><use href="assets/icons.svg#i-send"/></svg>发送动态</button>
+                </div>
+                <div id="galleryContainer"></div>
+            </section>
+
+            <!-- 一起做过的事 -->
+            <section class="section" id="memorySection">
+                <div class="lui-card">
+                    <div class="lui-card-head">
+                        <div class="lui-badge-icon"><svg class="lui-icon"><use href="assets/icons.svg#i-sparkles"/></svg></div>
+                        <div><h3>一起做过的事</h3><div class="sub">每一次打卡都算数</div></div>
+                    </div>
+                    <div class="lui-flex" style="gap:8px;">
+                        <input class="lui-input" id="memoryInput" placeholder="添加我们一起做过的事…" style="flex:1; min-width:0;">
+                        <button class="lui-btn primary" onclick="addMemory()"><svg class="lui-icon s18"><use href="assets/icons.svg#i-plus"/></svg>添加</button>
+                    </div>
+                </div>
+                <div id="memoryList"></div>
+            </section>
+
+            <!-- 感动的话 -->
+            <section class="section" id="loveSection">
+                <div class="lui-card">
+                    <div class="lui-card-head">
+                        <div class="lui-badge-icon"><svg class="lui-icon"><use href="assets/icons.svg#i-heart"/></svg></div>
+                        <div><h3>那些让我感动的话</h3><div class="sub">记下每个心动瞬间</div></div>
+                    </div>
+                    <div class="lui-field"><textarea class="lui-textarea" id="loveInput" placeholder="写下TA让你感动的话…"></textarea></div>
+                    <div class="lui-segmented" style="margin-bottom:14px;">
+                        <label class="priv-seg"><input type="radio" name="lovePrivacy" value="public" checked><svg class="lui-icon"><use href="assets/icons.svg#i-globe"/></svg>公开</label>
+                        <label class="priv-seg"><input type="radio" name="lovePrivacy" value="private"><svg class="lui-icon"><use href="assets/icons.svg#i-lock"/></svg>私密</label>
+                    </div>
+                    <button class="lui-btn primary block" onclick="addLove()"><svg class="lui-icon"><use href="assets/icons.svg#i-check"/></svg>保存</button>
+                </div>
+                <div id="loveList"></div>
+            </section>
+
+            <!-- 待办备忘录 -->
+            <section class="section" id="memoSection">
+                <div class="lui-card">
+                    <div class="lui-card-head">
+                        <div class="lui-badge-icon"><svg class="lui-icon"><use href="assets/icons.svg#i-check-square"/></svg></div>
+                        <div><h3>待办备忘录</h3><div class="sub">一起把计划一件件勾掉</div></div>
+                    </div>
+                    <div class="lui-flex" style="gap:8px; margin-bottom:4px;">
+                        <input type="text" id="memoInput" class="lui-input" placeholder="添加待办事项…" style="flex:1; min-width:0;">
+                        <select id="memoPriority" class="lui-select" style="width:auto; flex:none;">
+                            <option value="normal">普通</option>
+                            <option value="important">重要</option>
+                            <option value="urgent">紧急</option>
+                        </select>
+                        <button class="lui-btn primary" onclick="addMemo()"><svg class="lui-icon s18"><use href="assets/icons.svg#i-plus"/></svg>添加</button>
+                    </div>
+                </div>
+                <div id="memoList"></div>
+            </section>
+
+            <!-- 行程 / 纪念日 -->
+            <section class="section" id="todoSection">
+                <div class="lui-card">
+                    <div class="lui-card-head">
+                        <div class="lui-badge-icon"><svg class="lui-icon"><use href="assets/icons.svg#i-calendar"/></svg></div>
+                        <div><h3>行程模块</h3><div class="sub">计划好我们的下一次出发</div></div>
+                    </div>
+                    <div class="lui-flex" style="gap:8px; margin-bottom:10px; flex-wrap:wrap;">
+                        <input type="date" id="scheduleStart" class="lui-input" style="flex:1; min-width:130px;">
+                        <input type="date" id="scheduleEnd" class="lui-input" style="flex:1; min-width:130px;">
+                    </div>
+                    <div class="lui-flex" style="gap:8px;">
+                        <input type="text" id="scheduleTitle" class="lui-input" placeholder="行程标题" style="flex:1; min-width:0;">
+                        <button class="lui-btn primary" onclick="addSchedule()"><svg class="lui-icon s18"><use href="assets/icons.svg#i-plus"/></svg>添加</button>
+                    </div>
+                </div>
+                <div id="scheduleList"></div>
+                <div class="lui-card">
+                    <div class="lui-card-head">
+                        <div class="lui-badge-icon amber"><svg class="lui-icon"><use href="assets/icons.svg#i-cake"/></svg></div>
+                        <div><h3>纪念日倒计时</h3><div class="sub">期待每一个特别的日子</div></div>
+                    </div>
+                    <div class="lui-flex" style="gap:8px; flex-wrap:wrap;">
+                        <input type="text" id="countdownName" class="lui-input" placeholder="纪念日名称" style="flex:1; min-width:130px;">
+                        <input type="date" id="countdownDate" class="lui-input" style="flex:1; min-width:130px;">
+                        <button class="lui-btn primary" onclick="addCountdown()"><svg class="lui-icon s18"><use href="assets/icons.svg#i-plus"/></svg>添加</button>
+                    </div>
+                </div>
+                <div id="countdownList"></div>
+            </section>
+
+            <!-- 生气模式 -->
+            <section class="section" id="angrySection">
+                <div class="lui-card">
+                    <div class="lui-card-head">
+                        <div class="lui-badge-icon red"><svg class="lui-icon"><use href="assets/icons.svg#i-heart-crack"/></svg></div>
+                        <div><h3>生气模式</h3><div class="sub">哄好了，才算完</div></div>
+                    </div>
+                    <div id="angryStatus" class="lui-card soft" style="padding:14px; margin-bottom:14px; font-size:var(--f-sub); line-height:1.6;">当前状态：没有生气，开开心心</div>
+                    <button class="lui-btn primary block" onclick="toggleAngryMode()" id="angryBtn">启用生气模式</button>
+                </div>
+                <div id="apologyList"></div>
+            </section>
+
+            <!-- 旅行地图 -->
+            <section class="section" id="travelSection">
+                <div class="lui-card flush" style="padding:8px; margin-bottom:12px;">
+                    <div id="map" class="map-container"></div>
+                </div>
+                <div class="lui-flex" style="gap:8px; margin-bottom:12px;">
+                    <input type="text" id="markerName" class="lui-input" placeholder="地点名称" style="flex:1; min-width:0;">
+                    <button class="lui-btn primary" onclick="addMarkerFromInput()"><svg class="lui-icon s18"><use href="assets/icons.svg#i-map-pin"/></svg>添加标记</button>
+                </div>
+                <div id="markerList" class="map-marker-list"></div>
+            </section>
+
+            <div class="footer-tag">我们的专属小站 · 专属优化版</div>
+        </div>
+
+        <!-- 底部浮动坞：8 tab -->
         <nav class="lui-tabbar">
             <button class="tab active" data-section="message"><svg class="lui-icon"><use href="assets/icons.svg#i-message"/></svg><span class="t-label">留言</span></button>
             <button class="tab" data-section="gallery"><svg class="lui-icon"><use href="assets/icons.svg#i-photo"/></svg><span class="t-label">相册</span></button>
@@ -259,244 +415,162 @@
             <button class="tab" data-section="angry"><svg class="lui-icon"><use href="assets/icons.svg#i-heart-crack"/></svg><span class="t-label">生气</span></button>
             <button class="tab" data-section="travel"><svg class="lui-icon"><use href="assets/icons.svg#i-map-pin"/></svg><span class="t-label">地图</span></button>
         </nav>
-
-        <div class="lui-body">
-            <!-- 留言板 -->
-            <div class="section active" id="messageSection">
-                <div class="lui-card">
-                    <div class="lui-card-head"><div class="lui-badge-icon"><svg class="lui-icon"><use href="assets/icons.svg#i-message"/></svg></div><div><h3>给 TA 的悄悄话</h3><div class="sub">写下此刻想说的话</div></div></div>
-                    <div class="lui-field"><textarea class="lui-textarea" id="messageInput" placeholder="想对 TA 说什么…"></textarea></div>
-                    <div class="lui-field"><label class="lui-filepick" for="messagePhotoInput"><svg class="lui-icon s16"><use href="assets/icons.svg#i-photo"/></svg><span class="fp-name" id="messagePhotoName">添加照片（可选）</span><input type="file" id="messagePhotoInput" accept="image/*" onchange="var n=document.getElementById('messagePhotoName');if(n)n.textContent=this.files.length?this.files[0].name:'添加照片（可选）';"></label><div id="messagePhotoPreview" style="margin-top:10px;"></div></div>
-                    <button class="lui-btn primary block submit-btn" id="msgSubmitBtn" onclick="addMessageWithPhoto()"><svg class="lui-icon"><use href="assets/icons.svg#i-send"/></svg>发送留言</button>
-                </div>
-                <div id="messageList"></div>
-            </div>
-
-            <!-- 时光相册 -->
-            <div class="section" id="gallerySection">
-                <div class="lui-card">
-                    <div class="lui-card-head"><div class="lui-badge-icon"><svg class="lui-icon"><use href="assets/icons.svg#i-photo"/></svg></div><div><h3>时光相册</h3><div class="sub">朋友圈模式，记录你们的日常</div></div></div>
-                    <div class="upload-zone" onclick="document.getElementById('fileInput').click()"><svg class="lui-icon s24"><use href="assets/icons.svg#i-camera"/></svg>点击选择照片 / 视频（可多选）<input type="file" id="fileInput" accept="image/*,video/*" multiple style="display:none"></div>
-                    <div id="selectedFilesPreview" class="preview-images"></div>
-                    <div class="lui-field"><textarea class="lui-textarea" id="feedDesc" placeholder="写一段描述…（选填）"></textarea></div>
-                    <button class="lui-btn primary block submit-btn" id="feedSubmitBtn" onclick="uploadFeed()"><svg class="lui-icon"><use href="assets/icons.svg#i-send"/></svg>发送动态</button>
-                </div>
-                <div id="galleryContainer"></div>
-            </div>
-
-            <!-- 一起做过的事 -->
-            <div class="section" id="memorySection">
-                <div class="lui-card">
-                    <div class="lui-card-head"><div class="lui-badge-icon"><svg class="lui-icon"><use href="assets/icons.svg#i-sparkles"/></svg></div><div><h3>一起做过的事</h3><div class="sub">完成一件，就打卡一件</div></div></div>
-                    <div style="display:flex;gap:8px;">
-                        <input class="lui-input" id="memoryInput" placeholder="添加我们一起做过的事…">
-                        <button class="lui-btn tonal" onclick="addMemory()"><svg class="lui-icon"><use href="assets/icons.svg#i-plus"/></svg>添加</button>
-                    </div>
-                </div>
-                <div id="memoryList"></div>
-            </div>
-
-            <!-- 感动的话 -->
-            <div class="section" id="loveSection">
-                <div class="lui-card">
-                    <div class="lui-card-head"><div class="lui-badge-icon"><svg class="lui-icon"><use href="assets/icons.svg#i-heart"/></svg></div><div><h3>让我感动的话</h3><div class="sub">记下那些心软的瞬间</div></div></div>
-                    <div class="lui-field"><textarea class="lui-textarea" id="loveInput" placeholder="写下 TA 让你感动的话…"></textarea></div>
-                    <div class="lui-field">
-                        <div class="lui-label">可见范围</div>
-                        <div style="display:flex;gap:10px;align-items:center;font-size:var(--f-sub);">
-                            <label style="display:flex;align-items:center;gap:6px;"><input type="radio" name="lovePrivacy" value="public" checked style="accent-color:var(--rose);width:16px;height:16px;">公开（对方可见）</label>
-                            <label style="display:flex;align-items:center;gap:6px;"><input type="radio" name="lovePrivacy" value="private" style="accent-color:var(--rose);width:16px;height:16px;">私密（仅自己可见）</label>
-                        </div>
-                    </div>
-                    <button class="lui-btn primary block" onclick="addLove()">保存</button>
-                </div>
-                <div id="loveList"></div>
-            </div>
-
-            <!-- 待办备忘录 -->
-            <div class="section" id="memoSection">
-                <div class="lui-card">
-                    <div class="lui-card-head"><div class="lui-badge-icon"><svg class="lui-icon"><use href="assets/icons.svg#i-check-square"/></svg></div><div><h3>待办备忘录</h3><div class="sub">两个人的计划清单</div></div></div>
-                    <div style="display:flex;gap:8px;">
-                        <input type="text" class="lui-input" id="memoInput" placeholder="添加待办事项…">
-                        <select id="memoPriority" class="lui-select sm" style="width:auto;">
-                            <option value="normal">普通</option>
-                            <option value="important">重要</option>
-                            <option value="urgent">紧急</option>
-                        </select>
-                        <button class="lui-btn tonal" onclick="addMemo()"><svg class="lui-icon"><use href="assets/icons.svg#i-plus"/></svg>添加</button>
-                    </div>
-                </div>
-                <div id="memoList"></div>
-            </div>
-
-            <!-- 行程 / 纪念日 -->
-            <div class="section" id="todoSection">
-                <div class="lui-card">
-                    <div class="lui-card-head"><div class="lui-badge-icon"><svg class="lui-icon"><use href="assets/icons.svg#i-calendar"/></svg></div><div><h3>行程安排</h3><div class="sub">计划下一次出发</div></div></div>
-                    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px;">
-                        <input type="date" class="lui-input sm" id="scheduleStart" style="flex:1;min-width:120px;">
-                        <input type="date" class="lui-input sm" id="scheduleEnd" style="flex:1;min-width:120px;">
-                    </div>
-                    <div style="display:flex;gap:8px;">
-                        <input type="text" class="lui-input" id="scheduleTitle" placeholder="行程标题">
-                        <button class="lui-btn tonal" onclick="addSchedule()"><svg class="lui-icon"><use href="assets/icons.svg#i-plus"/></svg>添加</button>
-                    </div>
-                </div>
-                <div id="scheduleList"></div>
-                <div class="lui-card" style="margin-top:14px;">
-                    <div class="lui-card-head"><div class="lui-badge-icon gold" style="background:var(--gold-tint);color:var(--gold);"><svg class="lui-icon"><use href="assets/icons.svg#i-gift"/></svg></div><div><h3>纪念日倒计时</h3><div class="sub">那些特别的日子</div></div></div>
-                    <div style="display:flex;gap:8px;">
-                        <input type="text" class="lui-input" id="countdownName" placeholder="纪念日名称">
-                        <input type="date" class="lui-input sm" id="countdownDate" style="width:auto;">
-                        <button class="lui-btn tonal" onclick="addCountdown()"><svg class="lui-icon"><use href="assets/icons.svg#i-plus"/></svg>添加</button>
-                    </div>
-                </div>
-                <div id="countdownList"></div>
-            </div>
-
-            <!-- 生气模式 -->
-            <div class="section" id="angrySection">
-                <div class="lui-card">
-                    <div class="lui-card-head"><div class="lui-badge-icon amber"><svg class="lui-icon"><use href="assets/icons.svg#i-heart-crack"/></svg></div><div><h3>生气模式</h3><div class="sub">不开心的时候，留给彼此台阶</div></div></div>
-                    <div id="angryStatus" style="margin-bottom:12px;"></div>
-                    <button class="lui-btn tonal block" onclick="toggleAngryMode()" id="angryBtn">启用生气模式</button>
-                </div>
-                <div id="apologyList"></div>
-            </div>
-
-            <!-- 旅行地图 -->
-            <div class="section" id="travelSection">
-                <div class="lui-card" style="padding:10px;">
-                    <div id="map" class="map-container"></div>
-                </div>
-                <div class="lui-card">
-                    <div style="display:flex;gap:8px;">
-                        <input type="text" class="lui-input" id="markerName" placeholder="地点名称">
-                        <button class="lui-btn tonal" onclick="addMarkerFromInput()"><svg class="lui-icon"><use href="assets/icons.svg#i-map-pin"/></svg>添加标记</button>
-                    </div>
-                </div>
-                <div id="markerList" class="map-marker-list"></div>
-            </div>
-        </div>
+      </div>
     </div>
 
-    <!-- ============ 生气遮罩 ============ -->
-    <div id="angryMask" class="lui-overlay center">
+    <!-- 生气遮罩 -->
+    <div class="lui-overlay center" id="angryMask" style="display:none;">
         <div class="lui-modal">
-            <div style="text-align:center;margin-bottom:10px;">
-                <div class="lui-badge-icon amber" style="margin:0 auto 10px;"><svg class="lui-icon s24"><use href="assets/icons.svg#i-heart-crack"/></svg></div>
-                <div class="lui-title" style="margin-bottom:4px;">TA 正在生气</div>
-                <div class="lui-sub">快去写封道歉信哄哄 TA 吧</div>
-            </div>
-            <textarea class="lui-textarea" id="apologyInput" placeholder="写道歉信…"></textarea>
-            <button class="lui-btn primary block" style="margin-top:12px;" onclick="submitApology()">提交道歉</button>
-            <button class="lui-btn subtle block" style="margin-top:8px;" onclick="closeAngryMask()">暂不道歉，先逛逛</button>
+            <div class="m-title"><span class="lui-badge-icon red" style="width:34px;height:34px;"><svg class="lui-icon"><use href="assets/icons.svg#i-heart-crack"/></svg></span>TA 正在生气</div>
+            <div class="m-text">快去写封道歉信哄哄TA吧</div>
+            <textarea class="lui-textarea" id="apologyInput" placeholder="写道歉信…" style="margin-bottom:14px;"></textarea>
+            <button class="lui-btn danger block" onclick="submitApology()" style="margin-bottom:10px;"><svg class="lui-icon"><use href="assets/icons.svg#i-check"/></svg>提交道歉</button>
+            <button class="lui-btn ghost block" onclick="closeAngryMask(true)">暂不道歉，先逛逛</button>
         </div>
     </div>
 
-    <!-- ============ 大图查看 ============ -->
+    <!-- 二次确认弹窗（删除/清空/改权限/重置密码统一走这里） -->
+    <div class="lui-overlay center" id="confirmModal" style="display:none;">
+        <div class="lui-modal">
+            <div class="m-title"><span id="cmIcon"></span><span id="cmTitle">确认操作</span></div>
+            <div class="m-text" id="cmText"></div>
+            <div class="m-actions">
+                <button class="lui-btn ghost" id="cmCancel" style="flex:1;">再想想</button>
+                <button class="lui-btn danger" id="cmOk" style="flex:1;">确认</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 图片查看 -->
     <div class="image-modal" id="imageModal" onclick="closeModal()">
-        <span class="close-x" onclick="closeModal()"><svg class="lui-icon"><use href="assets/icons.svg#i-x"/></svg></span>
+        <button class="close-x" onclick="closeModal()"><svg class="lui-icon s20"><use href="assets/icons.svg#i-x"/></svg></button>
         <button class="nav-arrow left" onclick="prevPhoto(event)"><svg class="lui-icon"><use href="assets/icons.svg#i-chevron-left"/></svg></button>
-        <div class="modal-content" onclick="event.stopPropagation()" style="text-align:center;">
+        <div class="modal-content" onclick="event.stopPropagation()">
             <img id="modalImage" src="">
-            <div><button class="lui-btn tonal sm" id="downloadImageBtn" style="margin-top:14px;"><svg class="lui-icon"><use href="assets/icons.svg#i-download"/></svg>下载</button></div>
+            <button class="download-btn" id="downloadImageBtn"><svg class="lui-icon"><use href="assets/icons.svg#i-download"/></svg>下载</button>
         </div>
         <button class="nav-arrow right" onclick="nextPhoto(event)"><svg class="lui-icon"><use href="assets/icons.svg#i-chevron-right"/></svg></button>
     </div>
 
-    <!-- ============ 视频查看 ============ -->
+    <!-- 视频查看 -->
     <div class="video-modal" id="videoModal">
-        <div>
-            <span class="close-x" onclick="closeVideoModal()"><svg class="lui-icon"><use href="assets/icons.svg#i-x"/></svg></span>
-            <video id="modalVideo" controls></video>
+        <div class="modal-content" style="position:relative;">
+            <button class="close-x" style="position:absolute; top:-52px; right:0;" onclick="closeVideoModal()"><svg class="lui-icon s20"><use href="assets/icons.svg#i-x"/></svg></button>
+            <video id="modalVideo" controls style="max-width:92vw; max-height:82vh; border-radius:14px;"></video>
         </div>
     </div>
 
-    <!-- ============ 头像修改 ============ -->
-    <div id="avatarModal" class="lui-overlay center">
-        <div class="lui-modal">
-            <div class="m-title"><span class="lui-badge-icon"><svg class="lui-icon"><use href="assets/icons.svg#i-camera"/></svg></span>修改头像</div>
-            <div class="lui-field"><label class="lui-filepick" for="avatarInput"><svg class="lui-icon s16"><use href="assets/icons.svg#i-photo"/></svg><span class="fp-name" id="avatarName">选择头像图片</span><input type="file" id="avatarInput" accept="image/*" onchange="var n=document.getElementById('avatarName');if(n)n.textContent=this.files.length?this.files[0].name:'选择头像图片';"></label></div>
-            <button class="lui-btn primary block" onclick="updateAvatar()">保存头像</button>
+    <!-- 头像修改（底部抽屉） -->
+    <div id="avatarModal" class="lui-overlay" style="display:none;">
+        <div class="lui-sheet">
+            <div class="grabber"></div>
+            <div class="m-title"><span class="lui-badge-icon"><svg class="lui-icon"><use href="assets/icons.svg#i-photo"/></svg></span>修改头像</div>
+            <label class="lui-filepick" for="avatarInput" style="margin-bottom:14px;"><svg class="lui-icon s16"><use href="assets/icons.svg#i-photo"/></svg><span class="fp-name" id="avatarName">选择头像图片</span><input type="file" id="avatarInput" accept="image/*" onchange="var n=document.getElementById('avatarName');if(n)n.textContent=this.files.length?this.files[0].name:'选择头像图片';"></label>
+            <button class="lui-btn primary block" onclick="updateAvatar()" style="margin-bottom:10px;">保存头像</button>
+            <button class="lui-btn ghost block" onclick="closeModalById('avatarModal')">取消</button>
         </div>
     </div>
 
-    <!-- ============ 修改密码 ============ -->
-    <div id="passwordModal" class="lui-overlay center">
-        <div class="lui-modal">
+    <!-- 修改密码 -->
+    <div id="passwordModal" class="lui-overlay" style="display:none;">
+        <div class="lui-sheet">
+            <div class="grabber"></div>
             <div class="m-title"><span class="lui-badge-icon"><svg class="lui-icon"><use href="assets/icons.svg#i-lock"/></svg></span>修改密码</div>
-            <div class="lui-field"><label>原密码</label><input type="password" class="lui-input" id="oldPwd" placeholder="原密码"></div>
-            <div class="lui-field"><label>新密码</label><input type="password" class="lui-input" id="newPwd" placeholder="新密码"></div>
-            <div class="lui-field"><label>确认新密码</label><input type="password" class="lui-input" id="confirmPwd" placeholder="确认新密码"></div>
-            <button class="lui-btn primary block" onclick="changePassword()">确认修改</button>
+            <div class="lui-field"><input type="password" id="oldPwd" class="lui-input" placeholder="原密码"></div>
+            <div class="lui-field"><input type="password" id="newPwd" class="lui-input" placeholder="新密码"></div>
+            <div class="lui-field"><input type="password" id="confirmPwd" class="lui-input" placeholder="确认新密码"></div>
+            <button class="lui-btn primary block" onclick="changePassword()" style="margin-bottom:10px;">确认修改</button>
+            <button class="lui-btn ghost block" onclick="closeModalById('passwordModal')">取消</button>
         </div>
     </div>
 
-    <!-- ============ 修改用户名 ============ -->
-    <div id="usernameModal" class="lui-overlay center">
-        <div class="lui-modal">
+    <!-- 修改用户名 -->
+    <div id="usernameModal" class="lui-overlay" style="display:none;">
+        <div class="lui-sheet">
+            <div class="grabber"></div>
             <div class="m-title"><span class="lui-badge-icon"><svg class="lui-icon"><use href="assets/icons.svg#i-pencil"/></svg></span>修改用户名</div>
-            <div class="m-text">当前用户名：<b id="renameCurrentUser"></b>。改名后，你发布的内容会自动归属到新名字。</div>
-            <div class="lui-field"><input type="text" class="lui-input" id="newUsernameInput" placeholder="新用户名（字母/数字/下划线/点/减号）" autocomplete="off"></div>
-            <div class="lui-field"><input type="password" class="lui-input" id="renamePwd" placeholder="输入当前密码确认"></div>
-            <button class="lui-btn primary block" onclick="changeUsername()">确认修改</button>
+            <div class="lui-sub" style="margin-bottom:12px;">当前用户名：<b id="renameCurrentUser"></b>。改名后，你发布的内容会自动归属到新名字。</div>
+            <div class="lui-field"><input type="text" id="newUsernameInput" class="lui-input" placeholder="新用户名（字母/数字/下划线/点/减号）" autocomplete="off"></div>
+            <div class="lui-field"><input type="password" id="renamePwd" class="lui-input" placeholder="输入当前密码确认"></div>
+            <button class="lui-btn primary block" onclick="changeUsername()" style="margin-bottom:10px;">确认修改</button>
+            <button class="lui-btn ghost block" onclick="closeModalById('usernameModal')">取消</button>
         </div>
     </div>
 
-    <!-- ============ 注册 ============ -->
-    <div id="registerModal" class="lui-overlay center">
-        <div class="lui-modal">
-            <div class="m-title"><span class="lui-badge-icon"><svg class="lui-icon"><use href="assets/icons.svg#i-key"/></svg></span>注册新账号</div>
-            <div id="registerInviteWrap" style="display:none;margin-bottom:10px;">
-                <div class="lui-field"><input type="text" class="lui-input" id="newUserInvite" placeholder="注册邀请码（向管理员索取）"></div>
-                <div class="lui-mini">本站为私密小站，需要邀请码才能注册。</div>
+    <!-- 我的邮箱 -->
+    <div id="emailModal" class="lui-overlay" style="display:none;">
+        <div class="lui-sheet">
+            <div class="grabber"></div>
+            <div class="m-title"><span class="lui-badge-icon"><svg class="lui-icon"><use href="assets/icons.svg#i-mail"/></svg></span>我的邮箱</div>
+            <div class="lui-field"><input type="email" id="myEmailInput" class="lui-input" placeholder="填你的 QQ 邮箱，对方更新时通知你"></div>
+            <div class="lui-mini" style="margin-bottom:14px; line-height:1.6;">填了邮箱后，对方在网站发动态 / 留言 / 点赞时，你会收到邮件通知。留空则不接收通知。</div>
+            <button class="lui-btn primary block" onclick="saveMyEmail()" style="margin-bottom:10px;">保存邮箱</button>
+            <button class="lui-btn ghost block" onclick="closeModalById('emailModal')">取消</button>
+        </div>
+    </div>
+
+    <!-- 注册 -->
+    <div id="registerModal" class="lui-overlay" style="display:none;">
+        <div class="lui-sheet">
+            <div class="grabber"></div>
+            <div class="m-title"><span class="lui-badge-icon"><svg class="lui-icon"><use href="assets/icons.svg#i-user"/></svg></span>注册新账号</div>
+            <div id="registerInviteWrap" style="display:none; margin-bottom:12px;">
+                <input type="text" id="newUserInvite" class="lui-input" placeholder="注册邀请码（向管理员索取）">
+                <div class="lui-mini" style="margin:6px 2px 0;">本站为私密小站，需要邀请码才能注册。</div>
             </div>
-            <div class="lui-field"><input type="text" class="lui-input" id="newUsername" placeholder="账号" autocomplete="username"></div>
-            <div class="lui-field"><input type="password" class="lui-input" id="newUserPwd" placeholder="密码" autocomplete="new-password"></div>
-            <button class="lui-btn primary block submit-btn" onclick="registerNewUser()">注册</button>
+            <div class="lui-field"><input type="text" id="newUsername" class="lui-input" placeholder="账号"></div>
+            <div class="lui-field"><input type="password" id="newUserPwd" class="lui-input" placeholder="密码"></div>
+            <button class="lui-btn primary block submit-btn" onclick="registerNewUser()" style="margin-bottom:10px;">注册</button>
+            <button class="lui-btn ghost block" onclick="closeModalById('registerModal')">取消</button>
         </div>
     </div>
 
-    <!-- ============ 管理员设置账号密码 ============ -->
-    <div id="setUserPasswordModal" class="lui-overlay center">
-        <div class="lui-modal">
+    <!-- 设置账号密码（管理员重置） -->
+    <div id="setUserPasswordModal" class="lui-overlay" style="display:none;">
+        <div class="lui-sheet">
+            <div class="grabber"></div>
             <div class="m-title"><span class="lui-badge-icon"><svg class="lui-icon"><use href="assets/icons.svg#i-key"/></svg></span>设置账号密码</div>
-            <div class="lui-field"><input type="text" class="lui-input" id="setPwdUsername" placeholder="账号" readonly></div>
-            <div class="lui-field"><input type="password" class="lui-input" id="setPwdNew" placeholder="新密码"></div>
-            <div class="lui-field"><input type="password" class="lui-input" id="setPwdConfirm" placeholder="确认新密码"></div>
-            <button class="lui-btn primary block submit-btn" onclick="setUserPassword()">保存新密码</button>
+            <div class="lui-field"><input type="text" id="setPwdUsername" class="lui-input" placeholder="账号" readonly></div>
+            <div class="lui-field"><input type="password" id="setPwdNew" class="lui-input" placeholder="新密码"></div>
+            <div class="lui-field"><input type="password" id="setPwdConfirm" class="lui-input" placeholder="确认新密码"></div>
+            <button class="lui-btn primary block submit-btn" onclick="setUserPassword()" style="margin-bottom:10px;">保存新密码</button>
+            <button class="lui-btn ghost block" onclick="closeModalById('setUserPasswordModal')">取消</button>
         </div>
     </div>
 
-    <!-- ============ 梦幻气泡设置 ============ -->
-    <div id="bubbleSettingsModal" class="lui-overlay center">
-        <div class="lui-modal" style="max-width:420px;">
+    <!-- 气泡设置 -->
+    <div id="bubbleSettingsModal" class="lui-overlay" style="display:none;">
+        <div class="lui-sheet">
+            <div class="grabber"></div>
             <div class="m-title"><span class="lui-badge-icon"><svg class="lui-icon"><use href="assets/icons.svg#i-bubble"/></svg></span>梦幻背景气泡</div>
-            <div style="display:flex;justify-content:space-between;align-items:center;margin:12px 0;">
-                <span class="lui-body-text">开启气泡</span>
-                <label class="lui-switch"><input type="checkbox" id="bubbleToggle"><span class="track"></span></label>
+            <div class="lui-list" style="margin-bottom:14px;">
+                <div class="lui-list-row">
+                    <div class="lui-row-main"><div class="lui-row-title">开启气泡</div><div class="lui-row-sub">主界面角落缓缓漂浮照片</div></div>
+                    <label class="lui-switch"><input type="checkbox" id="bubbleToggle"><span class="track"></span></label>
+                </div>
+                <div class="lui-list-row">
+                    <div class="lui-row-main"><div class="lui-row-title">出现间隔（秒）</div></div>
+                    <input type="number" id="bubbleInterval" min="6" max="25" value="12" class="lui-input sm" style="width:96px; flex:none;">
+                </div>
             </div>
-            <div style="display:flex;justify-content:space-between;align-items:center;margin:12px 0;">
-                <span class="lui-body-text">出现间隔（秒）</span>
-                <input type="number" id="bubbleInterval" min="6" max="25" value="12" class="lui-input sm" style="width:90px;text-align:center;">
+            <div class="lui-sec-head"><h2 style="font-size:var(--f-sub);">共享照片池</h2></div>
+            <div style="margin-bottom:14px; padding:16px; border:1.5px dashed var(--line-2); border-radius:var(--r-md); text-align:center; cursor:pointer; color:var(--rose); font-weight:600; font-size:var(--f-sub);" onclick="document.getElementById('bubblePhotoInput').click()">
+                <svg class="lui-icon s18" style="vertical-align:-4px; margin-right:4px;"><use href="assets/icons.svg#i-plus"/></svg>添加照片
+                <input type="file" id="bubblePhotoInput" accept="image/*" multiple style="display:none">
             </div>
-            <div class="lui-label" style="margin:14px 0 8px;">共享照片池</div>
-            <div class="upload-zone" style="padding:14px;" onclick="document.getElementById('bubblePhotoInput').click()">添加照片<input type="file" id="bubblePhotoInput" accept="image/*" multiple style="display:none"></div>
             <div class="photo-list-preview" id="bubblePhotoList"></div>
-            <button class="lui-btn primary block" onclick="saveBubbleSettings()">保存</button>
-            <button class="lui-btn subtle block" style="margin-top:8px;" onclick="closeBubbleSettings()">关闭</button>
+            <button class="lui-btn primary block" onclick="saveBubbleSettings()" style="margin-bottom:10px;">保存</button>
+            <button class="lui-btn ghost block" onclick="closeBubbleSettings()">关闭</button>
         </div>
     </div>
 
-    <!-- ============ 管理后台 ============ -->
-    <div id="adminPanel" class="lui-overlay" style="align-items:stretch;padding:0;">
+    <!-- 管理后台（控制台质感，全屏覆盖） -->
+    <div id="adminPanel" class="lui-overlay" style="align-items:stretch; padding:0; display:none;">
         <div class="lui-shell lui-shell-admin" style="padding-bottom:30px;">
             <div class="lui-between" style="padding:16px 2px 0;">
                 <div>
                     <h1 class="lui-h2">管理控制台</h1>
-                    <div class="lui-mini">站点实时状态 · 安全与运维</div>
+                    <div class="lui-mini" style="margin-top:2px;">站点实时状态 · 安全与运维</div>
                 </div>
                 <button class="lui-btn icon" onclick="closeAdminPanel()"><svg class="lui-icon"><use href="assets/icons.svg#i-x"/></svg></button>
             </div>
@@ -505,8 +579,7 @@
         </div>
     </div>
 
-    <!-- Toast 容器 -->
+    <!-- Toast 轻提示 -->
     <div id="toastBox"></div>
-
 </body>
 </html>
