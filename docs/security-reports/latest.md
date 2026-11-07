@@ -1,4 +1,4 @@
-# 安全扫描摘要 2026-11-05T10:23:11.693Z
+# 安全扫描摘要 2026-11-07T09:38:29.967Z
 
 - 总分：**95** / 100　评级：**A**
 - high: 0　medium: 1　low: 2　info: 1
@@ -6,8 +6,8 @@
 
 ## 未通过项
 
-- [low] **错误文案不应泄露管理员账号特征** — 命中 32 处：archive/private-test.html:23; archive/private-test.html:26; archive/private-test.html:982; archive/private-test.html:1022; functions/api/account.js:280（修复：错误文案统一为“无权操作/未登录”，不暴露管理员角色名）
-- [low] **前端 innerHTML 使用数量** — app/lib/ 与 HTML 中共 223 处 innerHTML 赋值（需人工确认均不拼接用户输入）（修复：用户内容一律用 textContent，或做转义白名单）
+- [low] **错误文案不应泄露管理员账号特征** — 命中 32 处：archive/private-test.html:23; archive/private-test.html:26; archive/private-test.html:982; archive/private-test.html:1022; functions/api/account.js:295（修复：错误文案统一为“无权操作/未登录”，不暴露管理员角色名）
+- [low] **前端 innerHTML 使用数量** — app/lib/ 与 HTML 中共 219 处 innerHTML 赋值（需人工确认均不拼接用户输入）（修复：用户内容一律用 textContent，或做转义白名单）
 - [medium] **CSP script-src 不应包含 unsafe-inline** — 当前 script-src 含 unsafe-inline，内联脚本可被注入执行（修复：把内联脚本抽到外部 js 文件，改用 nonce/hash 模式收紧 script-src）
 
 ## 未知/未覆盖项
