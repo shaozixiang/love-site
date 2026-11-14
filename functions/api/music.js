@@ -12,6 +12,23 @@ const KUWO_SEARCH = 'https://search.kuwo.cn/r.s';
 const KUWO_ANTI = 'http://antiserver.kuwo.cn/anti.s';
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36';
 
+// 短缓存：同一 rid 的酷我直链 120s 内复用（直链本身约 4 分钟有效，留足安全余量），
+// 避免音频分段 Range 请求反复走 anti.s 解析造成缓冲卡顿
+const _directCache = new Map();
+async function resolveKuwoDirect(rid) {
+  const now = Date.now();
+  const hit = _directCache.get(rid);
+  if (hit && now - hit.t < 120000) return hit.url;
+  const antiResp = await fetch(KUWO_ANTI + '?format=mp3&rid=' + encodeURIComponent(rid) + '&type=convert_url&response=url', {
+    headers: { 'User-Agent': UA }
+  });
+  if (!antiResp.ok) throw new Error('kuwo resolve ' + antiResp.status);
+  const direct = (await antiResp.text()).trim();
+  if (!/^https?:\/\//.test(direct)) throw new Error('kuwo invalid direct');
+  _directCache.set(rid, { t: now, url: direct });
+  return direct;
+}
+
 export async function onRequestGet(context) {
   return handle(context);
 }
@@ -70,15 +87,10 @@ async function handle({ request, env }) {
   }
 
   if (action === 'resolve') {
-    // 酷我 rid → 实时拿完整 mp3 直链 → 302 重定向（audio 元素自动跟随，无 CORS 限制）
+    // 酷我 rid → 拿完整 mp3 直链 → 302 重定向（audio 元素自动跟随，无 CORS 限制）
     if (!/^MUSIC_\d+$/.test(String(rid || ''))) return json({ error: '参数错误' }, 400);
     try {
-      const antiResp = await fetch(KUWO_ANTI + '?format=mp3&rid=' + encodeURIComponent(rid) + '&type=convert_url&response=url', {
-        headers: { 'User-Agent': UA }
-      });
-      if (!antiResp.ok) return json({ error: '获取播放地址失败' }, 502);
-      const direct = (await antiResp.text()).trim();
-      if (!/^https?:\/\//.test(direct)) return json({ error: '该歌曲暂时无法播放' }, 404);
+      const direct = await resolveKuwoDirect(rid);
       return new Response(null, { status: 302, headers: { Location: direct } });
     } catch (e) {
       return json({ error: '播放服务暂时不可用，请稍后再试' }, 502);
@@ -86,17 +98,11 @@ async function handle({ request, env }) {
   }
 
   if (action === 'stream') {
-    // 酷我完整曲目"流式代理"：客户端 src 直指本代理 → worker 每次实时解析新鲜直链并转发 mp3 流。
-    // 目的：酷我 COS 直链带 Content-Disposition: attachment + 移动端会把音频当"下载"反复断流
-    // → 连累同页视频起播失败；代理重写为正常 inline 播放头，全端稳定。
+    // 酷我完整曲目"流式代理"：客户端 src 直指本代理 → worker 解析直链并转发 mp3 流，
+    // 重写为 inline 播放头（COS 原头 attachment 会让移动端当下载反复断流），全端稳定。
     if (!/^MUSIC_\d+$/.test(String(rid || ''))) return json({ error: '参数错误' }, 400);
     try {
-      const antiResp = await fetch(KUWO_ANTI + '?format=mp3&rid=' + encodeURIComponent(rid) + '&type=convert_url&response=url', {
-        headers: { 'User-Agent': UA }
-      });
-      if (!antiResp.ok) return json({ error: '获取播放地址失败' }, 502);
-      const direct = (await antiResp.text()).trim();
-      if (!/^https?:\/\//.test(direct)) return json({ error: '该歌曲暂时无法播放' }, 404);
+      const direct = await resolveKuwoDirect(rid);
       const rangeHeader = request.headers.get('range');
       const upstream = await fetch(direct, {
         redirect: 'follow',

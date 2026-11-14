@@ -201,6 +201,10 @@ async function handleAction(config, body, request, tenant, env) {
   if (action === 'toggleUserRole') return requireAdminThen(config, session.username, () => toggleUserRole(config, body.username, tenant), tenant);
   if (action === 'setUserPermission') return requireAdminThen(config, session.username, () => setUserPermission(config, body.username, body.permission, tenant), tenant);
   if (action === 'setUserPassword') return requireAdminThen(config, session.username, () => setUserPassword(config, body.username, body.newPassword, tenant), tenant);
+  if (action === 'platformSetPassword') {
+    if (!(await isPlatformAdmin(env, session.username, tenant))) throw httpError(403, '无权限：仅平台超管可跨租户重置密码');
+    return platformSetPassword(config, body);
+  }
   if (action === 'changePassword') return changePassword(config, session.username, body.oldPassword, body.newPassword, tenant);
   if (action === 'changeUsername') return changeUsername(config, session.username, body, tenant);
   if (action === 'updateAvatar') return updateAvatar(config, session.username, body.avatar, tenant);
@@ -451,6 +455,38 @@ async function setUserPassword(config, usernameInput, newPassword, tenant) {
   assertPassword(String(newPassword || ''));
   await updatePassword(config, username, String(newPassword), tenant);
   return { ok: true };
+}
+
+// 平台超管跨租户重置/设置密码：指定目标站点(slug或id) + 账号 + 新密码
+async function platformSetPassword(config, body) {
+  const targetRef = String(body.targetSlug || body.targetTenant || body.tenantId || '').trim();
+  const username = cleanUsername(body.username);
+  const newPassword = String(body.newPassword || '');
+  if (!targetRef) throw httpError(400, '请指定目标站点');
+  if (!username) throw httpError(400, '请指定要重置的账号');
+  assertPassword(newPassword);
+
+  // 解析目标租户（id 或 slug）
+  const q = /^\d+$/.test(targetRef)
+    ? `id=eq.${encodeURIComponent(targetRef)}`
+    : `slug=eq.${encodeURIComponent(targetRef)}`;
+  const tRows = await supabase(config, `/tenants?${q}&select=id,slug,name,status&limit=1`, { method: 'GET' });
+  const target = tRows && tRows[0];
+  if (!target) throw httpError(404, '目标站点不存在');
+  if (Number(target.id) === 1 && username === 'admin') throw httpError(400, '不能重置平台超管的密码');
+
+  // 校验目标账号存在
+  const uRows = await supabase(config, `/users?tenant_id=eq.${target.id}&username=eq.${encodeURIComponent(username)}&select=username&limit=1`, { method: 'GET' });
+  if (!(uRows && uRows[0])) throw httpError(404, '该站点下账号不存在');
+
+  // 生成新密码字段并更新（显式目标 tenant_id）
+  const fields = await buildPasswordFields(config, newPassword);
+  await supabase(config, `/users?tenant_id=eq.${target.id}&username=eq.${encodeURIComponent(username)}`, {
+    method: 'PATCH',
+    prefer: 'return=minimal',
+    body: { ...fields, password_updated_at: new Date().toISOString() }
+  });
+  return { ok: true, tenant: target.slug, username };
 }
 
 async function changePassword(config, username, oldPassword, newPassword, tenant) {
