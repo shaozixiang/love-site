@@ -13,7 +13,7 @@ import { resolveTenant } from '../_lib/tenant.js';
 
 const MAX_IMAGE_BYTES = 10 * 1024 * 1024;   // 普通图片 10MB
 const MAX_GIF_HEIC_BYTES = 20 * 1024 * 1024; // 动图(GIF)/实况照片(HEIC) 20MB（Git Data base64 ≤100MB 以内）
-const MAX_VIDEO_BYTES = 30 * 1024 * 1024;   // 视频 30MB
+const MAX_VIDEO_BYTES = 50 * 1024 * 1024;   // 视频 50MB（Git Data blob base64 上限100MB，50MB→约67MB安全）
 const MAX_AUDIO_BYTES = 20 * 1024 * 1024;   // 音频 20MB
 const ALLOWED_FOLDERS = new Set(['common', 'feeds', 'messages', 'bubbles', 'avatars', 'loginbg']);
 
