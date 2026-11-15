@@ -16,6 +16,10 @@ const VALID_ORDERS = new Set(['sequence', 'random']);
 const VALID_TEMPLATES = new Set(['t1', 't2', 't3', 't4']);
 const MAX_ITEMS = 50;
 const MAX_AUTH_USERS = 100;
+const ENV_REPORT_ACTION = '登录页背景-环境上报';
+const ENV_REPORT_RETENTION_MS = 24 * 60 * 60 * 1000;
+const ENV_REPORT_CLEANUP_INTERVAL_MS = 10 * 60 * 1000;
+const envReportCleanupAt = new Map();
 
 function httpError(status, message) {
   const e = new Error(message);
@@ -49,6 +53,23 @@ async function serverLog(config, action, username, details, tenantId) {
       body: JSON.stringify(row)
     });
   } catch (e) {}
+}
+
+// 环境诊断只保留24小时；按租户限频后台删除，避免访问接口被清理任务拖慢。
+async function cleanupEnvironmentReports(config, tenant) {
+  const tenantId = Number(tenant && tenant.id) || 1;
+  const now = Date.now();
+  const last = envReportCleanupAt.get(tenantId) || 0;
+  if (now - last < ENV_REPORT_CLEANUP_INTERVAL_MS) return;
+  envReportCleanupAt.set(tenantId, now);
+  if (envReportCleanupAt.size > 500) {
+    for (const [id, at] of envReportCleanupAt) {
+      if (now - at > ENV_REPORT_RETENTION_MS) envReportCleanupAt.delete(id);
+    }
+  }
+  const cutoff = new Date(now - ENV_REPORT_RETENTION_MS).toISOString();
+  const path = `/admin_logs?action=eq.${encodeURIComponent(ENV_REPORT_ACTION)}&tenant_id=eq.${tenantId}&created_at=lt.${encodeURIComponent(cutoff)}`;
+  try { await supabase(config, path, { method: 'DELETE' }); } catch (e) {}
 }
 
 async function fetchConfigRow(config, tenant) {
@@ -135,7 +156,7 @@ export async function onRequest(context) {
     if (action === 'trace') {
       // 环境取证：登录页加载时上报 UA/屏幕/入口/事件，落 admin_logs 供排查三平台差异（不涉及敏感信息）
       const td = (body && body.data) || {};
-      await serverLog(config, '登录页背景-环境上报', 'guest', {
+      await serverLog(config, ENV_REPORT_ACTION, 'guest', {
         ev: String(td.ev || '').slice(0, 40),
         ua: String(td.ua || '').slice(0, 400),
         platform: String(td.platform || '').slice(0, 100),
@@ -144,9 +165,11 @@ export async function onRequest(context) {
         v: String(td.v || '').slice(0, 30),
         extra: JSON.stringify(td).slice(0, 500)
       }, tenant.id);
+      context.waitUntil(cleanupEnvironmentReports(config, tenant));
       return jsonResponse({ ok: true }, 200, headers);
     }
     if (action === 'getConfig') {
+      context.waitUntil(cleanupEnvironmentReports(config, tenant));
       // 会话可选：带会话时判断是否可编辑
       let session = null;
       const token = body.sessionToken || '';

@@ -1,0 +1,51 @@
+name: 清理过期环境上报（每小时）
+
+# 只删除 admin_logs 中 action=登录页背景-环境上报 且 created_at 超过24小时的记录。
+# 正常操作日志、行为日志和业务数据均不受影响；无需执行数据库 SQL。
+on:
+  schedule:
+    - cron: '17 * * * *'
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cleanup-env-logs
+  cancel-in-progress: false
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: 删除全部租户超过24小时的环境上报
+        env:
+          SUPABASE_URL: https://txeynuvttibnilvttieu.supabase.co
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: |
+          set -euo pipefail
+          if [ -z "$SUPABASE_SERVICE_ROLE_KEY" ]; then
+            echo "::error::缺少 SUPABASE_SERVICE_ROLE_KEY，无法执行数据库清理"
+            exit 1
+          fi
+          cutoff=$(date -u -d '24 hours ago' +%Y-%m-%dT%H:%M:%S.000Z)
+          echo "[$(date -u)] 清理 cutoff=$cutoff 之前的登录页环境上报"
+          code=$(curl --silent --show-error --max-time 45 \
+            --output /tmp/env-log-cleanup-response.json \
+            --write-out '%{http_code}' \
+            --request DELETE \
+            --header "apikey: $SUPABASE_SERVICE_ROLE_KEY" \
+            --header "Authorization: Bearer $SUPABASE_SERVICE_ROLE_KEY" \
+            --header 'Prefer: return=minimal' \
+            --get "$SUPABASE_URL/rest/v1/admin_logs" \
+            --data-urlencode 'action=eq.登录页背景-环境上报' \
+            --data-urlencode "created_at=lt.$cutoff")
+          case "$code" in
+            200|204) echo "环境上报清理完成（HTTP $code）" ;;
+            *)
+              echo "::error::环境上报清理失败（HTTP $code）"
+              head -c 1000 /tmp/env-log-cleanup-response.json || true
+              exit 1
+              ;;
+          esac
