@@ -203,9 +203,12 @@ export async function onRequest(context) {
 
     const response = new Response(ghResp.body, { status: ghResp.status, headers: outHeaders });
 
-    // 仅完整 200 响应写入边缘缓存（206 分段不缓存，避免半截覆盖整文件）
+    // 仅完整 200 响应写入边缘缓存（206 分段不缓存，避免半截覆盖整文件）。
+    // 缓存后台并发写入，响应体立即向浏览器流式返回；大视频不再等整文件落缓存后才起播。
     if (ghResp.status === 200 && cache.put) {
-      try { await cache.put(cacheKey, response.clone()); } catch (e) {}
+      const cacheWrite = cache.put(cacheKey, response.clone()).catch(() => {});
+      if (typeof context.waitUntil === 'function') context.waitUntil(cacheWrite);
+      else await cacheWrite;
     }
     return response;
   } catch (e) {

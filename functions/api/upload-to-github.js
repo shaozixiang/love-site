@@ -200,13 +200,18 @@ export async function onRequest(context) {
         const proto = new URL(request.url).protocol || 'https:';
         const host = request.headers.get('Host') || '';
         // 补租户头，使 img 代理归属校验通过（loginbg 免登录）
-        fetch(`${proto}//${host}${proxyUrl}`, {
+        const warmRequest = fetch(`${proto}//${host}${proxyUrl}`, {
           headers: {
             'Range': 'bytes=0-',
             'X-Tenant-Id': String(tenant.id),
             'X-Tenant-Slug': tenant.slug
           }
+        }).then(async (resp) => {
+          // 消费流但不缓冲到内存：确保后台预热真正跑完，同时不阻塞上传响应。
+          if (resp.body) await resp.body.pipeTo(new WritableStream());
         }).catch(() => {});
+        if (typeof context.waitUntil === 'function') context.waitUntil(warmRequest);
+        else await warmRequest;
       } catch (e) {}
     }
 

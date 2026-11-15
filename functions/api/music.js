@@ -1,7 +1,7 @@
 // 背景音乐搜索/解析代理
-// search：优先酷我（完整曲库，返回可动态解析的播放地址）；酷我失败时回退网易云（30s 试听外链）
-// resolve：酷我 rid → 实时获取完整 mp3 直链并 302 重定向（每次新鲜签名，永不过期、永不截断）
-// play：网易云外链代理（仅回退链路使用）
+// search：网易云相关性优先，自动匹配酷我完整音源；网易云不可用时回退酷我
+// resolve/stream：酷我 rid → 动态解析并流式播放完整音源
+// play：网易云外链代理（未匹配歌曲使用，版权限制时可能仅有试听）
 // 登录态：search 需要有效会话（防滥用）；resolve/play 免登录（登录页未登录时也要播放）
 import { getConfig, requireSession } from '../_lib/session.js';
 import { resolveTenant } from '../_lib/tenant.js';
@@ -71,18 +71,16 @@ async function handle({ request, env }) {
     catch (e) { return json({ error: '需要登录后才能搜索音乐' }, 401); }
   }
 
-  if (action === 'search') {    if (!keyword || String(keyword).trim().length < 1) return json({ error: '请输入歌名' }, 400);
+  if (action === 'search') {
+    if (!keyword || String(keyword).trim().length < 1) return json({ error: '请输入歌名' }, 400);
     const q = String(keyword).trim();
-    // 1) 酷我：完整曲库 + 动态解析完整播放（优先）
-    try {
-      const songs = await kuwoSearch(q);
-      if (songs && songs.length) return json({ ok: true, songs: songs, source: 'kuwo' });
-    } catch (e) {}
-    // 2) 网易云回退：多端点 failover（试听 30s 外链）
-    try {
-      const songs = await neteaseSearch(q);
-      if (songs && songs.length) return json({ ok: true, songs: songs, source: 'netease' });
-    } catch (e) {}
+    // 双音源并行：网易云负责歌名/歌手相关性，酷我负责可匹配的完整播放地址。
+    // 不再让酷我的低相关排序覆盖知名歌曲的网易云结果。
+    const [neteaseResult, kuwoResult] = await Promise.allSettled([neteaseSearch(q), kuwoSearch(q)]);
+    const neteaseSongs = neteaseResult.status === 'fulfilled' ? neteaseResult.value : [];
+    const kuwoSongs = kuwoResult.status === 'fulfilled' ? kuwoResult.value : [];
+    const songs = mergeMusicResults(neteaseSongs, kuwoSongs);
+    if (songs.length) return json({ ok: true, songs, source: neteaseSongs.length ? 'netease' : 'kuwo' });
     return json({ error: '没搜到相关歌曲，换个关键词试试' }, 404);
   }
 
@@ -186,11 +184,45 @@ async function kuwoSearch(keyword) {
       artist: artist || '',
       album: '',
       duration: secs * 1000,
-      url: '/api/music?action=resolve&rid=' + rid
+      url: '/api/music?action=resolve&rid=' + rid,
+      playSource: 'kuwo',
+      full: true
     });
     if (out.length >= 15) break;
   }
   return out;
+}
+
+function musicNorm(value) {
+  return String(value || '').toLowerCase().replace(/[\s·•・,，.。!！?？:：;；'\"‘’“”_\-—/\\|]+/g, '');
+}
+function musicBaseTitle(value) {
+  return musicNorm(String(value || '').replace(/[\(（\[【][^\)）\]】]*[\)）\]】]/g, ''));
+}
+function musicArtistMatches(a, b) {
+  const left = musicNorm(a), right = musicNorm(b);
+  if (!left || !right) return true;
+  return left.indexOf(right) >= 0 || right.indexOf(left) >= 0;
+}
+function mergeMusicResults(neteaseSongs, kuwoSongs) {
+  if (!neteaseSongs.length) return kuwoSongs.slice(0, 15);
+  const remaining = kuwoSongs.slice();
+  return neteaseSongs.slice(0, 15).map(function (song) {
+    const exactTitle = musicNorm(song.name), baseTitle = musicBaseTitle(song.name);
+    let matchIndex = remaining.findIndex(function (candidate) {
+      return musicNorm(candidate.name) === exactTitle && musicArtistMatches(song.artist, candidate.artist);
+    });
+    if (matchIndex < 0 && baseTitle) {
+      matchIndex = remaining.findIndex(function (candidate) {
+        return musicBaseTitle(candidate.name) === baseTitle && musicArtistMatches(song.artist, candidate.artist);
+      });
+    }
+    if (matchIndex >= 0) {
+      const match = remaining.splice(matchIndex, 1)[0];
+      return Object.assign({}, song, { url: match.url, playSource: 'kuwo', full: true });
+    }
+    return song;
+  });
 }
 
 // 网易云搜索：兼容 artists/ar 字段；duration 毫秒
@@ -219,7 +251,9 @@ async function neteaseSearch(keyword) {
           album: (s.album && s.album.name) || (s.al && s.al.name) || '',
           duration: s.duration || s.dt || 0,
           albumPic: (s.album && s.album.picUrl) || (s.al && s.al.picUrl) || '',
-          url: ''
+          url: '/api/music?action=play&id=' + s.id,
+          playSource: 'netease',
+          full: false
         };
       });
     } catch (e) { continue; }
