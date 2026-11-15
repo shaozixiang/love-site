@@ -7,7 +7,7 @@
 // 未登录 → 401，图片不可见
 // ============================================================
 
-import { requireSession, readCookie } from '../../_lib/session.js';
+import { requireSession, readCookie, hmacHex, constantTimeEqual } from '../../_lib/session.js';
 
 // 允许的仓库内路径前缀（按需收紧）
 const ALLOWED_PREFIXES = [
@@ -29,6 +29,15 @@ function requestedImageWidth(url, rel) {
   if (!/\.(jpe?g|png|gif|webp|avif)$/i.test(rel)) return 0;
   const width = Number(url.searchParams.get('w') || 0);
   return ALLOWED_IMAGE_WIDTHS.has(width) ? width : 0;
+}
+async function verifyInternalResize(url, rel, secret) {
+  if (!secret) return false;
+  const exp = Number(url.searchParams.get('__resize_exp') || 0);
+  const sig = String(url.searchParams.get('__resize_sig') || '');
+  const now = Math.floor(Date.now() / 1000);
+  if (!sig || !exp || exp < now || exp > now + 300) return false;
+  const expected = await hmacHex(secret, `img-resize:${rel}:${exp}`);
+  return constantTimeEqual(expected, sig);
 }
 function ttlFor(rel) {
   return /\.(mp4|mov|webm|m4v|3gp|3g2|avi|mpeg|mkv)$/i.test(rel) ? VIDEO_CACHE_TTL : IMAGE_CACHE_TTL;
@@ -83,16 +92,20 @@ export async function onRequest(context) {
       ? subRel.startsWith('/loginbg/')
       : rel.startsWith('/loginbg/');
 
-    // 1. 会话校验：cookie 优先，header 兜底
+    // 1. 会话校验：cookie 优先，header 兜底；Cloudflare 内部缩放使用 2 分钟 HMAC 源站凭证。
     if (!isPublic) {
-      const token = readCookie(request.headers.get('Cookie') || '', 'couple_t') || request.headers.get('X-Couple-Token') || '';
-      try {
-        await requireSession(
-          { sessionSecret: env.AUTH_SESSION_SECRET || env.SUPABASE_SERVICE_ROLE_KEY || env.SUPABASE_SERVICE_KEY, supabaseUrl: String(env.SUPABASE_URL || '').replace(/\/$/, ''), serviceKey: env.SUPABASE_SERVICE_ROLE_KEY || env.SUPABASE_SERVICE_KEY },
-          token, currentTenant
-        );
+      const sessionSecret = env.AUTH_SESSION_SECRET || env.SUPABASE_SERVICE_ROLE_KEY || env.SUPABASE_SERVICE_KEY;
+      const internalResize = await verifyInternalResize(url, rel, sessionSecret);
+      if (!internalResize) {
+        const token = readCookie(request.headers.get('Cookie') || '', 'couple_t') || request.headers.get('X-Couple-Token') || '';
+        try {
+          await requireSession(
+            { sessionSecret, supabaseUrl: String(env.SUPABASE_URL || '').replace(/\/$/, ''), serviceKey: env.SUPABASE_SERVICE_ROLE_KEY || env.SUPABASE_SERVICE_KEY },
+            token, currentTenant
+          );
+        }
+        catch (e) { return jsonResponse({ error: '未登录或登录已失效' }, 401); }
       }
-      catch (e) { return jsonResponse({ error: '未登录或登录已失效' }, 401); }
     }
 
     // 3. 边缘缓存：原图与不同尺寸/格式的缩略图分键缓存，避免缩略图覆盖原图。
@@ -144,14 +157,14 @@ export async function onRequest(context) {
       // 无 w 参数的请求仍走上方原始 GitHub 代理，不会形成缩放循环；鉴权与租户头原样传递。
       const sourceUrl = new URL(request.url);
       sourceUrl.search = '';
+      const exp = Math.floor(Date.now() / 1000) + 120;
+      const sessionSecret = env.AUTH_SESSION_SECRET || env.SUPABASE_SERVICE_ROLE_KEY || env.SUPABASE_SERVICE_KEY;
+      sourceUrl.searchParams.set('__resize_exp', String(exp));
+      sourceUrl.searchParams.set('__resize_sig', await hmacHex(sessionSecret, `img-resize:${rel}:${exp}`));
       const sourceHeaders = {
         'User-Agent': 'couple-site-private-img-resize',
         'Accept': 'image/*,*/*;q=0.8'
       };
-      const cookie = request.headers.get('Cookie') || '';
-      const coupleToken = request.headers.get('X-Couple-Token') || '';
-      if (cookie) sourceHeaders['Cookie'] = cookie;
-      if (coupleToken) sourceHeaders['X-Couple-Token'] = coupleToken;
       if (tenantSlug) sourceHeaders['X-Tenant-Slug'] = tenantSlug;
       if (tenantIdHdr) sourceHeaders['X-Tenant-Id'] = tenantIdHdr;
       ghResp = await fetch(sourceUrl.toString(), {
