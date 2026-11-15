@@ -398,6 +398,82 @@ img, video { max-width: 100%; display: block; }
 .lui-page-head h1 { font-size: var(--f-h1); line-height: 1.15; letter-spacing: -0.02em; }
 .lui-page-head .sub { color: var(--ink-2); font-size: var(--f-sub); margin-top: 6px; }
 
+/* 恋爱纪念 Hero：两版首页共用，不再用一行小字表达最重要的纪念日 */
+.lui-page-head.love-hero {
+    position: relative;
+    overflow: hidden;
+    margin: 14px 0 16px;
+    padding: 22px;
+    border: 1px solid var(--line);
+    border-radius: var(--r-xl);
+    background: linear-gradient(135deg, var(--elev) 0%, var(--rose-tint) 100%);
+    box-shadow: var(--sh-sm);
+}
+.love-hero::before,
+.love-hero::after {
+    content: '';
+    position: absolute;
+    border-radius: 50%;
+    background: var(--rose-tint-2);
+    opacity: .38;
+    pointer-events: none;
+}
+.love-hero::before { width: 150px; height: 150px; right: -58px; top: -76px; }
+.love-hero::after { width: 86px; height: 86px; right: 54px; bottom: -62px; opacity: .24; }
+.love-hero-top { position: relative; z-index: 1; display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+.love-hero .eyebrow { margin-bottom: 5px; }
+.love-hero h1 { font-size: clamp(23px, 6vw, 30px); }
+.love-hero-emblem {
+    width: 46px;
+    height: 46px;
+    flex: none;
+    display: grid;
+    place-items: center;
+    border-radius: 16px;
+    background: var(--grad-rose);
+    color: #fff;
+    box-shadow: var(--sh-rose-sm);
+    transform: rotate(5deg);
+}
+.love-hero-emblem .lui-icon { width: 23px; height: 23px; }
+.love-hero .sub { position: relative; z-index: 1; margin-top: 21px; color: var(--ink-2); }
+.love-days-main { display: flex; align-items: baseline; flex-wrap: wrap; gap: 5px; }
+.love-days-label { margin-right: 4px; color: var(--ink); font-size: 15px; font-weight: 600; }
+.love-days-number {
+    color: var(--rose-2);
+    font-size: clamp(46px, 13vw, 60px);
+    font-weight: 780;
+    line-height: .95;
+    letter-spacing: -.045em;
+    font-variant-numeric: tabular-nums;
+}
+.love-days-unit { color: var(--rose-2); font-size: 18px; font-weight: 700; }
+.love-days-meta { display: flex; align-items: center; flex-wrap: wrap; gap: 7px; margin-top: 12px; color: var(--ink-3); font-size: var(--f-mini); line-height: 1.6; }
+.love-days-date {
+    display: inline-flex;
+    align-items: center;
+    min-height: 25px;
+    padding: 2px 9px;
+    border: 1px solid var(--line);
+    border-radius: var(--r-pill);
+    background: var(--elev);
+    color: var(--ink-2);
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+}
+.love-days-empty strong { display: block; color: var(--ink); font-size: 18px; line-height: 1.45; }
+.love-days-empty span { display: block; margin-top: 7px; color: var(--ink-3); font-size: var(--f-mini); line-height: 1.7; }
+.love-days-loading { color: var(--ink-3); font-size: var(--f-sub); }
+@media (min-width: 720px) {
+    .lui-page-head.love-hero { padding: 26px 28px; }
+    .love-days-number { font-size: 64px; }
+}
+@media (max-width: 380px) {
+    .lui-page-head.love-hero { padding: 18px; }
+    .love-hero-emblem { width: 42px; height: 42px; border-radius: 14px; }
+    .love-days-number { font-size: 46px; }
+}
+
 /* 区块小标题 */
 .lui-sec-head { display: flex; align-items: center; justify-content: space-between; margin: 18px 2px 10px; }
 .lui-sec-head h2 { font-size: var(--f-title); font-weight: 650; }

@@ -4,16 +4,16 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
     <title>我们的专属小站</title>
-    <meta name="version" content="20261115h">
-<script>try{if(!location.search.match(/[?&]v=/)){location.replace(location.pathname+location.hash+'?v=20261115h');}}catch(e){}</script>
+    <meta name="version" content="20261115i">
+<script>try{if(!location.search.match(/[?&]v=/)){location.replace(location.pathname+location.hash+'?v=20261115i');}}catch(e){}</script>
 
     <script>try{var t=localStorage.getItem('couple_theme')||'rose';if(t&&document.documentElement)document.documentElement.setAttribute('data-theme',t);}catch(e){}</script>
-    <link rel="stylesheet" href="assets/love-ui.css?v=20261115h">
+    <link rel="stylesheet" href="assets/love-ui.css?v=20261115i">
     <link rel="stylesheet" href="/lib/leaflet.css?v=20261011a">
     <script defer src="/lib/leaflet.js?v=20261011a"></script>
     <script defer src="/lib/supabase-v2.js?v=20261011a"></script>
-    <script defer src="/lib/app-v2.js?v=20261115h"></script>
-    <script defer src="/lib/login-bg.js?v=20261115h"></script>
+    <script defer src="/lib/app-v2.js?v=20261115i"></script>
+    <script defer src="/lib/login-bg.js?v=20261115i"></script>
 
     <style>
 /* ============================================================
@@ -273,11 +273,16 @@
     <div id="mainPage" style="display:none;">
       <div class="lui-shell">
         <div class="lui-body">
-            <!-- 大标题区 -->
-            <div class="lui-page-head">
-                <div class="eyebrow">Our Station</div>
-                <h1>我们的专属小站</h1>
-                <div class="sub" id="togetherDaysDisplay"></div>
+            <!-- 恋爱纪念 Hero -->
+            <div class="lui-page-head love-hero">
+                <div class="love-hero-top">
+                    <div>
+                        <div class="eyebrow">Our Station</div>
+                        <h1>我们的专属小站</h1>
+                    </div>
+                    <div class="love-hero-emblem" aria-hidden="true"><svg class="lui-icon"><use href="assets/icons.svg#i-heart-fill"/></svg></div>
+                </div>
+                <div class="sub" id="togetherDaysDisplay" aria-live="polite"></div>
             </div>
 
             <!-- 用户信息条 -->
