@@ -26,7 +26,8 @@ const VIDEO_CACHE_TTL = 86400;
 // 相册列表只加载缩略图，点开仍看原图。宽度采用固定档位，避免任意参数造成无限制转换。
 const ALLOWED_IMAGE_WIDTHS = new Set([480, 960]);
 function requestedImageWidth(url, rel) {
-  if (!/\.(jpe?g|png|gif|webp|avif)$/i.test(rel)) return 0;
+  // 当前转换链路对 AVIF 输入返回 415；AVIF 原图通常已较小，直接走原图。
+  if (!/\.(jpe?g|png|gif|webp)$/i.test(rel)) return 0;
   const width = Number(url.searchParams.get('w') || 0);
   return ALLOWED_IMAGE_WIDTHS.has(width) ? width : 0;
 }
