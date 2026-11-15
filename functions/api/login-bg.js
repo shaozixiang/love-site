@@ -20,6 +20,7 @@ const ENV_REPORT_ACTION = '登录页背景-环境上报';
 const ENV_REPORT_RETENTION_MS = 24 * 60 * 60 * 1000;
 const ENV_REPORT_CLEANUP_INTERVAL_MS = 10 * 60 * 1000;
 const envReportCleanupAt = new Map();
+let envReportCleanupAllAt = 0;
 
 function httpError(status, message) {
   const e = new Error(message);
@@ -70,6 +71,22 @@ async function cleanupEnvironmentReports(config, tenant) {
   const cutoff = new Date(now - ENV_REPORT_RETENTION_MS).toISOString();
   const path = `/admin_logs?action=eq.${encodeURIComponent(ENV_REPORT_ACTION)}&tenant_id=eq.${tenantId}&created_at=lt.${encodeURIComponent(cutoff)}`;
   try { await supabase(config, path, { method: 'DELETE' }); } catch (e) {}
+}
+
+// 定时任务专用：动作与时间条件均固定在服务端，调用者不能指定表、日志类型或保留时长。
+async function cleanupAllEnvironmentReports(config) {
+  const now = Date.now();
+  if (now - envReportCleanupAllAt < ENV_REPORT_CLEANUP_INTERVAL_MS) return { ok: true, throttled: true };
+  envReportCleanupAllAt = now;
+  const cutoff = new Date(now - ENV_REPORT_RETENTION_MS).toISOString();
+  const path = `/admin_logs?action=eq.${encodeURIComponent(ENV_REPORT_ACTION)}&created_at=lt.${encodeURIComponent(cutoff)}`;
+  try {
+    await supabase(config, path, { method: 'DELETE' });
+    return { ok: true, throttled: false, cutoff };
+  } catch (e) {
+    envReportCleanupAllAt = 0;
+    throw e;
+  }
 }
 
 async function fetchConfigRow(config, tenant) {
@@ -153,6 +170,10 @@ export async function onRequest(context) {
   const action = String(body.action || '');
 
   try {
+    if (action === 'cleanupExpiredEnvReports') {
+      const result = await cleanupAllEnvironmentReports(config);
+      return jsonResponse(result, 200, headers);
+    }
     if (action === 'trace') {
       // 环境取证：登录页加载时上报 UA/屏幕/入口/事件，落 admin_logs 供排查三平台差异（不涉及敏感信息）
       const td = (body && body.data) || {};
