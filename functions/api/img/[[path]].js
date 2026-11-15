@@ -138,20 +138,38 @@ export async function onRequest(context) {
     const isInitialRange = !rangeHeader || /^bytes=0-$/.test(rangeHeader.trim());
     if (rangeHeader && !isInitialRange) upstreamHeaders['Range'] = rangeHeader;
 
-    const fetchOptions = { headers: upstreamHeaders };
+    let ghResp;
     if (resizeWidth) {
-      fetchOptions.cf = {
-        image: {
-          width: resizeWidth,
-          fit: 'scale-down',
-          quality: 82,
-          format: resizeFormat,
-          metadata: 'none',
-          anim: false
-        }
+      // Image Resizing 直接拉 GitHub 私仓时不会可靠携带 PAT，改为读取本站同路径的无参数原图。
+      // 无 w 参数的请求仍走上方原始 GitHub 代理，不会形成缩放循环；鉴权与租户头原样传递。
+      const sourceUrl = new URL(request.url);
+      sourceUrl.search = '';
+      const sourceHeaders = {
+        'User-Agent': 'couple-site-private-img-resize',
+        'Accept': 'image/*,*/*;q=0.8'
       };
+      const cookie = request.headers.get('Cookie') || '';
+      const coupleToken = request.headers.get('X-Couple-Token') || '';
+      if (cookie) sourceHeaders['Cookie'] = cookie;
+      if (coupleToken) sourceHeaders['X-Couple-Token'] = coupleToken;
+      if (tenantSlug) sourceHeaders['X-Tenant-Slug'] = tenantSlug;
+      if (tenantIdHdr) sourceHeaders['X-Tenant-Id'] = tenantIdHdr;
+      ghResp = await fetch(sourceUrl.toString(), {
+        headers: sourceHeaders,
+        cf: {
+          image: {
+            width: resizeWidth,
+            fit: 'scale-down',
+            quality: 82,
+            format: resizeFormat,
+            metadata: 'none',
+            anim: false
+          }
+        }
+      });
+    } else {
+      ghResp = await fetch(upstream, { headers: upstreamHeaders });
     }
-    const ghResp = await fetch(upstream, fetchOptions);
     if (!ghResp.ok && ghResp.status !== 206) {
       return jsonResponse({ error: '图片获取失败：' + ghResp.status }, ghResp.status === 404 ? 404 : 502);
     }
