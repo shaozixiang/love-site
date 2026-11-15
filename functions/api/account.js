@@ -87,10 +87,11 @@ export async function onRequest(context) {
 
   try {
     const result = await handleAction(config, body || {}, request, tenant, env);
-    await accountLog(config, (body || {}).action || '', body || {}, result, request, null, tenant);
+    // 日志写库不阻塞登录响应，避免成功登录还要多等一次 Supabase 往返。
+    try { context.waitUntil(accountLog(config, (body || {}).action || '', body || {}, result, request, null, tenant)); } catch (e) {}
     return jsonResponse(result, 200, headers);
   } catch (error) {
-    await accountLog(config, (body || {}).action || '', body || {}, null, request, error, tenant);
+    try { context.waitUntil(accountLog(config, (body || {}).action || '', body || {}, null, request, error, tenant)); } catch (e) {}
     return jsonResponse({ error: error.message || 'Account request failed.' }, error.status || 500, headers);
   }
 }

@@ -1,6 +1,6 @@
 // ============================================================
 // 共享会话/鉴权/CORS 工具（Pages Functions 各入口统一引用）
-// - requireSession：HMAC 验签 + 过期校验 + users 表存活校验（防幽灵令牌）
+// - requireSession：HMAC 验签 + 过期校验 + users 表存活校验（15 秒成功缓存/并发合并）
 // - checkAdmin：管理员判定
 // - checkAllowedOrigin：Origin 白名单（空 Origin = 同源请求一律放行）
 // - 各入口保持原有行为：验签失败/账号已删 → 抛出 Error('登录已失效')，
@@ -73,15 +73,37 @@ export async function signSession(config, username, tenantId = 1) {
   return `${encoded}.${await hmacHex(config.sessionSecret, encoded)}`;
 }
 
-// 账号是否仍存在（防幽灵令牌：删号后旧 token 立即失效）
+// 账号是否仍存在（防幽灵令牌；成功结果最多缓存 15 秒）
+// 相册会并发请求多张图片；同一实例内合并并发查库，并仅缓存成功结果 15 秒，
+// 避免每张图片都重复请求 users 表。失败不缓存，删号后最迟 15 秒失效。
+const USER_ALIVE_CACHE_MS = 15000;
+const userAliveCache = new Map();
+const userAliveInflight = new Map();
 export async function isUserAlive(config, username, tenantId = null) {
-  try {
-    let q = `select=username&username=eq.${encodeURIComponent(username)}&limit=1`;
-    if (tenantId !== null) q += `&tenant_id=eq.${Number(tenantId)}`;
-    const resp = await fetch(`${config.supabaseUrl}/rest/v1/users?${q}`, { headers: authHeaders(config) });
-    const rows = await resp.json().catch(() => null);
-    return Array.isArray(rows) && rows.length > 0 && rows[0].username === username;
-  } catch (e) { return false; }
+  const key = `${tenantId === null ? '*' : Number(tenantId)}:${username}`;
+  const cached = userAliveCache.get(key);
+  if (cached && cached.until > Date.now()) return true;
+  if (userAliveInflight.has(key)) return userAliveInflight.get(key);
+  const task = (async () => {
+    try {
+      let q = `select=username&username=eq.${encodeURIComponent(username)}&limit=1`;
+      if (tenantId !== null) q += `&tenant_id=eq.${Number(tenantId)}`;
+      const resp = await fetch(`${config.supabaseUrl}/rest/v1/users?${q}`, { headers: authHeaders(config) });
+      const rows = await resp.json().catch(() => null);
+      const alive = Array.isArray(rows) && rows.length > 0 && rows[0].username === username;
+      if (alive) {
+        if (userAliveCache.size > 500) {
+          const now = Date.now();
+          for (const [k, v] of userAliveCache) { if (v.until <= now) userAliveCache.delete(k); }
+        }
+        userAliveCache.set(key, { until: Date.now() + USER_ALIVE_CACHE_MS });
+      }
+      return alive;
+    } catch (e) { return false; }
+  })();
+  userAliveInflight.set(key, task);
+  try { return await task; }
+  finally { userAliveInflight.delete(key); }
 }
 
 // 验签 + 过期 + 存活；失败抛 Error('登录已失效')

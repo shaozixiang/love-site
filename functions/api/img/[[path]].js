@@ -23,6 +23,13 @@ const PUBLIC_PREFIXES = ['/loginbg/'];
 // - 兜底：仍有按路径的主动 purge，跨 colo 未命中时最坏按 TTL 过期
 const IMAGE_CACHE_TTL = 3600;
 const VIDEO_CACHE_TTL = 86400;
+// 相册列表只加载缩略图，点开仍看原图。宽度采用固定档位，避免任意参数造成无限制转换。
+const ALLOWED_IMAGE_WIDTHS = new Set([480, 960]);
+function requestedImageWidth(url, rel) {
+  if (!/\.(jpe?g|png|gif|webp|avif)$/i.test(rel)) return 0;
+  const width = Number(url.searchParams.get('w') || 0);
+  return ALLOWED_IMAGE_WIDTHS.has(width) ? width : 0;
+}
 function ttlFor(rel) {
   return /\.(mp4|mov|webm|m4v|3gp|3g2|avi|mpeg|mkv)$/i.test(rel) ? VIDEO_CACHE_TTL : IMAGE_CACHE_TTL;
 }
@@ -88,11 +95,15 @@ export async function onRequest(context) {
       catch (e) { return jsonResponse({ error: '未登录或登录已失效' }, 401); }
     }
 
-    // 3. 边缘缓存：按“仓库内路径”缓存整文件，所有登录用户共享。
+    // 3. 边缘缓存：原图与不同尺寸/格式的缩略图分键缓存，避免缩略图覆盖原图。
     //    命中整文件时，Range 请求直接从缓存切片返回 206（视频拖动秒响应）。
-    const rangeHeader = request.headers.get('Range') || '';
+    const resizeWidth = requestedImageWidth(url, rel);
+    const rangeHeader = resizeWidth ? '' : (request.headers.get('Range') || '');
+    const accept = request.headers.get('Accept') || '';
+    const resizeFormat = /image\/avif/i.test(accept) ? 'avif' : (/image\/webp/i.test(accept) ? 'webp' : 'jpeg');
+    const variant = resizeWidth ? `?w=${resizeWidth}&fm=${resizeFormat}` : '';
     const cache = caches.default;
-    const cacheKey = new Request(`https://img-cache.local/${rel}`);
+    const cacheKey = new Request(`https://img-cache.local/${rel}${variant}`);
     const cached = await cache.match(cacheKey);
     if (cached) {
       // 整文件在缓存中：有 Range 就按字节切片，无 Range 直接返回
@@ -127,11 +138,24 @@ export async function onRequest(context) {
     const isInitialRange = !rangeHeader || /^bytes=0-$/.test(rangeHeader.trim());
     if (rangeHeader && !isInitialRange) upstreamHeaders['Range'] = rangeHeader;
 
-    const ghResp = await fetch(upstream, { headers: upstreamHeaders });
+    const fetchOptions = { headers: upstreamHeaders };
+    if (resizeWidth) {
+      fetchOptions.cf = {
+        image: {
+          width: resizeWidth,
+          fit: 'scale-down',
+          quality: 82,
+          format: resizeFormat,
+          metadata: 'none',
+          anim: false
+        }
+      };
+    }
+    const ghResp = await fetch(upstream, fetchOptions);
     if (!ghResp.ok && ghResp.status !== 206) {
       return jsonResponse({ error: '图片获取失败：' + ghResp.status }, ghResp.status === 404 ? 404 : 502);
     }
-    const contentType = guessContentType(rel) || ghResp.headers.get('Content-Type') || 'application/octet-stream';
+    const contentType = resizeWidth ? `image/${resizeFormat}` : (guessContentType(rel) || ghResp.headers.get('Content-Type') || 'application/octet-stream');
     const ttl = ttlFor(rel);
     const outHeaders = {
       'Content-Type': contentType,
