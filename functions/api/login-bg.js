@@ -240,7 +240,7 @@ export async function onRequest(context) {
       } catch (e) { /* 列尚未添加：跳过 */ }
 
       // 保存配置（按 tenant_id 幂等 upsert，每租户一行）
-      await supabase(config, '/login_bg_config', {
+      await supabase(config, '/login_bg_config?on_conflict=tenant_id', {
         method: 'POST',
         body: {
           tenant_id: tenant.id, enabled, mode, order_mode, template,
