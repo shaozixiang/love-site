@@ -62,6 +62,7 @@ header.scrolled{border-bottom-color:var(--line)}
   flex:1;display:flex;align-items:center;justify-content:center;gap:7px;
   padding:10px 8px;border:none;border-radius:10px;background:transparent;
   font:inherit;font-size:13.5px;font-weight:600;color:var(--ink-2);cursor:pointer;transition:.18s;
+  white-space:nowrap;
 }
 .tab.on{background:var(--accent-soft);color:var(--accent)}
 .tab .n{font-size:11px;font-weight:700;padding:1px 7px;border-radius:999px;background:var(--line-2);color:var(--ink-3)}
@@ -151,11 +152,11 @@ header.scrolled{border-bottom-color:var(--line)}
 .toast.on{opacity:1;transform:translate(-50%,0)}
 
 @media (max-width:520px){
-  .row{align-items:flex-start}
-  .f-acts{flex-direction:column}
-  .act{width:34px;padding:0;justify-content:center}
-  .act.primary{width:auto;padding:0 12px}
-  .act .txt{display:none}
+  .row{flex-wrap:wrap;align-items:center}
+  .f-body{flex:1 1 auto}
+  .f-acts{width:100%;flex-direction:row;justify-content:flex-end;margin-top:8px;gap:8px}
+  .act{width:auto;padding:0 12px}
+  .act.icon-only{width:34px;padding:0}
 }
 </style>
 </head>
