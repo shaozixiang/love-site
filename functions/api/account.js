@@ -86,7 +86,7 @@ export async function onRequest(context) {
   const tenant = await resolveTenant(request, config);
 
   try {
-    const result = await handleAction(config, body || {}, request, tenant, env);
+    const result = await handleAction(config, body || {}, request, tenant, env, (promise) => context.waitUntil(promise));
     // 日志写库不阻塞登录响应，避免成功登录还要多等一次 Supabase 往返。
     try { context.waitUntil(accountLog(config, (body || {}).action || '', body || {}, result, request, null, tenant)); } catch (e) {}
     return jsonResponse(result, 200, headers);
@@ -170,12 +170,20 @@ async function accountLog(config, action, body, result, request, error, tenant) 
   } catch (e) {}
 }
 
-async function handleAction(config, body, request, tenant, env) {
+async function handleAction(config, body, request, tenant, env, defer) {
   const action = String(body.action || '');
   if (action === 'login') {
     const key = `rate_login_${getClientIp(request)}_${cleanUsername(body.username)}`;
     await checkAuthRate(config, key, LOGIN_MAX_FAIL, LOGIN_WINDOW_MS, LOGIN_LOCK_MS);
-    try { const r = await login(config, body, tenant); await clearAuthRate(config, key); return r; }
+    try {
+      const r = await login(config, body, tenant);
+      // 成功后的失败计数清理不阻塞返回；失败时仍同步记录，保证限流准确。
+      try {
+        if (typeof defer === 'function') defer(clearAuthRate(config, key));
+        else await clearAuthRate(config, key);
+      } catch (e) {}
+      return r;
+    }
     catch (e) { await recordAuthFailure(config, key, LOGIN_WINDOW_MS, LOGIN_LOCK_MS, LOGIN_MAX_FAIL); throw e; }
   }
   if (action === 'publicRegister') {
