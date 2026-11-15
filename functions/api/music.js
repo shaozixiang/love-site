@@ -9,6 +9,7 @@ import { resolveTenant } from '../_lib/tenant.js';
 
 const NETEASE_SEARCH = 'https://music.163.com/api/search/get/web';
 const NETEASE_OUTER = 'https://music.163.com/song/media/outer/url';
+const NETEASE_SONG_URL = 'https://music.163.com/api/song/enhance/player/url';
 const KUWO_SEARCH = 'https://search.kuwo.cn/r.s';
 const KUWO_ANTI = 'http://antiserver.kuwo.cn/anti.s';
 const QQ_SEARCH = 'https://c.y.qq.com/soso/fcgi-bin/client_search_cp';
@@ -58,6 +59,32 @@ async function resolveMiguDirect(songId, copyrightId, contentId) {
   }
   _miguDirectCache.set(key, { t: now, url: location });
   return location;
+}
+
+// 网易云官方播放地址接口：比 outer/url 稳定，且能拿到文件大小和试听片段信息。
+// 版权受限歌曲会返回 30/45 秒试听，仍可播；url 为空时才判不可播。
+const _neteaseDirectCache = new Map();
+async function resolveNeteaseDirect(id) {
+  const key = String(id);
+  const now = Date.now();
+  const hit = _neteaseDirectCache.get(key);
+  if (hit && now - hit.t < 120000) return hit;
+  const resp = await fetch(NETEASE_SONG_URL + '?ids=[' + encodeURIComponent(id) + ']&br=320000', {
+    headers: { 'User-Agent': MOBILE_UA, Referer: 'https://music.163.com/', Cookie: 'appver=8.9.70; os=android', Accept: 'application/json' }
+  });
+  if (!resp.ok) throw new Error('netease url ' + resp.status);
+  const data = await resp.json();
+  const item = data && data.data && data.data[0];
+  if (!item || !item.url) throw new Error('netease unavailable');
+  const meta = {
+    t: now,
+    url: item.url,
+    size: Number(item.size || 0),
+    trial: !!item.freeTrialInfo,
+    type: item.type || 'mp3'
+  };
+  _neteaseDirectCache.set(key, meta);
+  return meta;
 }
 
 export async function onRequestGet(context) {
@@ -222,12 +249,12 @@ async function handle({ request, env }) {
   if (action === 'play') {
     if (!/^\d+$/.test(String(id || ''))) return json({ error: '参数错误' }, 400);
     try {
-      const upstream = await fetch(NETEASE_OUTER + '?id=' + id + '.mp3', {
+      const meta = await resolveNeteaseDirect(id);
+      const upstream = await fetch(meta.url, {
         redirect: 'follow',
         headers: {
           'User-Agent': MOBILE_UA,
           'Referer': 'https://music.163.com/',
-          'Cookie': 'appver=8.9.70; os=android',
           ...(request.headers.get('range') ? { 'Range': request.headers.get('range') } : {})
         }
       });
@@ -243,7 +270,7 @@ async function handle({ request, env }) {
       if (upstream.headers.get('content-length')) headers.set('Content-Length', upstream.headers.get('content-length'));
       return new Response(upstream.body, { status: upstream.status, headers: headers });
     } catch (e) {
-      return json({ error: '播放服务暂时不可用，请稍后再试' }, 502);
+      return json({ error: '该歌曲暂时无法播放（可能无版权外链）' }, 404);
     }
   }
 
@@ -320,19 +347,21 @@ function musicQueryScore(song, keyword) {
   return score;
 }
 function musicHasVariant(name) {
-  return /(live|cover|翻唱|现场|演唱会|伴奏|remix|mix|dj|试听|片段|纯音乐|instrumental|改编|舒缓|两会|网友|版|伴唱|消音|加速|降速|0\.8x|1\.1x|1\.2x|1\.5x)/i.test(String(name || ''));
+  return /(live|cover|翻唱|现场|演唱会|伴奏|remix|mix|dj|试听|片段|纯音乐|instrumental|改编|舒缓|两会|网友|版|伴唱|消音|加速|降速|吉他|0\.8x|1\.1x|1\.2x|1\.5x)/i.test(String(name || ''));
 }
 function findExactMusic(list, song) {
   const exactTitle = musicNorm(song.name), baseTitle = musicBaseTitle(song.name);
-  let idx = list.findIndex(function (candidate) {
+  const exact = list.filter(function (candidate) {
     return musicNorm(candidate.name) === exactTitle && musicArtistMatches(song.artist, candidate.artist);
   });
-  if (idx < 0 && baseTitle && !musicHasVariant(song.name)) {
-    idx = list.findIndex(function (candidate) {
+  if (exact.length) return exact.find(function (candidate) { return candidate.full && candidate.playable; }) || exact[0];
+  if (baseTitle && !musicHasVariant(song.name)) {
+    const base = list.filter(function (candidate) {
       return musicBaseTitle(candidate.name) === baseTitle && !musicHasVariant(candidate.name) && musicArtistMatches(song.artist, candidate.artist);
     });
+    if (base.length) return base.find(function (candidate) { return candidate.full && candidate.playable; }) || base[0];
   }
-  return idx >= 0 ? list[idx] : null;
+  return null;
 }
 function mergeMusicResults(keyword, neteaseSongs, kuwoSongs, qqSongs, miguSongs) {
   const candidates = [];
@@ -359,7 +388,7 @@ function mergeMusicResults(keyword, neteaseSongs, kuwoSongs, qqSongs, miguSongs)
     add(Object.assign({}, song,
       miguExact ? { url: miguExact.url, playSource: 'migu', sourceLabel: '咪咕音乐', full: true, playable: true } :
       kuwo ? { url: kuwo.url, playSource: 'kuwo', sourceLabel: '酷我音乐', full: true, playable: true } :
-      netease ? { url: netease.url, playSource: 'netease', sourceLabel: '网易云音乐', full: false, playable: netease.playable !== false } :
+      netease ? { url: netease.url, playSource: 'netease', sourceLabel: '网易云音乐', full: !!netease.full, playable: netease.playable !== false } :
       { url: '', playSource: 'qq', sourceLabel: 'QQ音乐', full: false, playable: false }));
   });
   miguSongs.forEach(function (song) {
@@ -377,7 +406,7 @@ function mergeMusicResults(keyword, neteaseSongs, kuwoSongs, qqSongs, miguSongs)
     add(Object.assign({}, song,
       song.playable ? {} :
       kuwo ? { url: kuwo.url, playSource: 'kuwo', sourceLabel: '酷我音乐', full: true, playable: true } :
-      netease ? { url: netease.url, playSource: 'netease', sourceLabel: '网易云音乐', full: false, playable: netease.playable !== false } :
+      netease ? { url: netease.url, playSource: 'netease', sourceLabel: '网易云音乐', full: !!netease.full, playable: netease.playable !== false } :
       { url: '', playSource: 'migu', sourceLabel: '咪咕音乐', full: false, playable: false }));
   });
   neteaseSongs.forEach(function (song) {
@@ -502,18 +531,16 @@ async function neteaseSearch(keyword) {
           playable: true
         };
       });
-      // 网易云无版权歌曲外链会 302 到 /404：先探测前 6 条，避免“显示可播但点了没声音”。
+      // 用官方播放地址接口探测前 6 条：能拿到直链才可播；无 freeTrialInfo 且文件较大时标为完整音源。
       const checks = await Promise.allSettled(result.slice(0, 6).map(function (s) {
-        return fetch(NETEASE_OUTER + '?id=' + s.id + '.mp3', { redirect: 'manual', headers: { 'User-Agent': MOBILE_UA } })
-          .then(function (r) {
-            const loc = r.headers.get('location') || '';
-            const type = r.headers.get('content-type') || '';
-            if (/^http/.test(loc)) return !/\/404($|\?)/.test(loc);
-            return type.indexOf('audio') === 0 || type.indexOf('octet-stream') >= 0 || type.indexOf('mpeg') >= 0;
-          });
+        return resolveNeteaseDirect(s.id);
       }));
       checks.forEach(function (check, index) {
-        if (result[index]) result[index].playable = check.status === 'fulfilled' && check.value === true;
+        if (!result[index]) return;
+        if (check.status !== 'fulfilled') { result[index].playable = false; return; }
+        result[index].playable = true;
+        result[index].full = !check.value.trial && check.value.size >= 1500000;
+        result[index].fileSize = check.value.size;
       });
       return result;
     } catch (e) { continue; }
