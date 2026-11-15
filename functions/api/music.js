@@ -1,8 +1,9 @@
 // 背景音乐搜索/解析代理
-// search：网易云相关性优先，自动匹配酷我完整音源；网易云不可用时回退酷我
+// search：QQ/咪咕/网易云负责原唱与相关性，酷我优先提供完整音源；咪咕可播时补充第三完整源
 // resolve/stream：酷我 rid → 动态解析并流式播放完整音源
+// miguStream：咪咕 copyrightId/contentId → 动态解析并流式播放完整音源
 // play：网易云外链代理（未匹配歌曲使用，版权限制时可能仅有试听）
-// 登录态：search 需要有效会话（防滥用）；resolve/play 免登录（登录页未登录时也要播放）
+// 登录态：search 需要有效会话（防滥用）；resolve/stream/miguStream/play 免登录（登录页未登录时也要播放）
 import { getConfig, requireSession } from '../_lib/session.js';
 import { resolveTenant } from '../_lib/tenant.js';
 
@@ -10,7 +11,12 @@ const NETEASE_SEARCH = 'https://music.163.com/api/search/get/web';
 const NETEASE_OUTER = 'https://music.163.com/song/media/outer/url';
 const KUWO_SEARCH = 'https://search.kuwo.cn/r.s';
 const KUWO_ANTI = 'http://antiserver.kuwo.cn/anti.s';
+const QQ_SEARCH = 'https://c.y.qq.com/soso/fcgi-bin/client_search_cp';
+const MIGU_SEARCH = 'https://pd.musicapp.migu.cn/MIGUM2.0/v1.0/content/search_all.do';
+const MIGU_LISTEN = 'https://app.c.nf.migu.cn/MIGUM2.0/v1.0/content/sub/listenSong.do';
+const MOBILE_UA = 'Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Mobile Safari/537.36';
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36';
+const MIGU_SEARCH_SWITCH = JSON.stringify({ song: 1, album: 0, singer: 0, tag: 0, playlist: 0, mv: 0, user: 0, rb: 0, dv: 0, podcast: 0, voice: 0, songlist: 0, radio: 0, cp: 0 });
 
 // 短缓存：同一 rid 的酷我直链 120s 内复用（直链本身约 4 分钟有效，留足安全余量），
 // 避免音频分段 Range 请求反复走 anti.s 解析造成缓冲卡顿
@@ -27,6 +33,31 @@ async function resolveKuwoDirect(rid) {
   if (!/^https?:\/\//.test(direct)) throw new Error('kuwo invalid direct');
   _directCache.set(rid, { t: now, url: direct });
   return direct;
+}
+
+// 咪咕直链时效更短，同样做 120 秒短缓存，避免试听/拖进度条时重复换取
+const _miguDirectCache = new Map();
+async function resolveMiguDirect(songId, copyrightId, contentId) {
+  const key = String(songId) + ':' + String(copyrightId) + ':' + String(contentId);
+  const now = Date.now();
+  const hit = _miguDirectCache.get(key);
+  if (hit && now - hit.t < 120000) return hit.url;
+  const query = new URLSearchParams({
+    toneFlag: 'PQ', netType: '00', userId: '1554861458870011', ua: 'Android_migu', version: '5.9',
+    channel: '014000D', copyrightId: String(copyrightId), contentId: String(contentId),
+    resourceType: '2', formatType: 'PQ', songId: String(songId)
+  });
+  const resp = await fetch(MIGU_LISTEN + '?' + query.toString(), {
+    redirect: 'manual',
+    headers: { 'User-Agent': MOBILE_UA, Referer: 'https://music.migu.cn/' }
+  });
+  const location = resp.headers.get('location') || '';
+  if (!/^https?:\/\//.test(location)) {
+    const body = await resp.text().catch(() => '');
+    throw new Error('migu unavailable ' + body.slice(0, 80));
+  }
+  _miguDirectCache.set(key, { t: now, url: location });
+  return location;
 }
 
 export async function onRequestGet(context) {
@@ -74,13 +105,46 @@ async function handle({ request, env }) {
   if (action === 'search') {
     if (!keyword || String(keyword).trim().length < 1) return json({ error: '请输入歌名' }, 400);
     const q = String(keyword).trim();
-    // 双音源并行：网易云负责歌名/歌手相关性，酷我负责可匹配的完整播放地址。
-    // 不再让酷我的低相关排序覆盖知名歌曲的网易云结果。
-    const [neteaseResult, kuwoResult] = await Promise.allSettled([neteaseSearch(q), kuwoSearch(q)]);
-    const neteaseSongs = neteaseResult.status === 'fulfilled' ? neteaseResult.value : [];
-    const kuwoSongs = kuwoResult.status === 'fulfilled' ? kuwoResult.value : [];
-    const songs = mergeMusicResults(neteaseSongs, kuwoSongs);
-    if (songs.length) return json({ ok: true, songs, source: neteaseSongs.length ? 'netease' : 'kuwo' });
+    // 四曲库并行：QQ/咪咕提供更准确的原唱曲库与额外完整音源，网易云/酷我保留原有可播链路。
+    const results = await Promise.allSettled([neteaseSearch(q), kuwoSearch(q), qqSearch(q), miguSearch(q)]);
+    const neteaseSongs = results[0].status === 'fulfilled' ? results[0].value : [];
+    const kuwoSongs = results[1].status === 'fulfilled' ? results[1].value : [];
+    const qqSongs = results[2].status === 'fulfilled' ? results[2].value : [];
+    let miguSongs = results[3].status === 'fulfilled' ? results[3].value : [];
+    // QQ/咪咕对“歌名+歌手”和“完整版本名”的召回不同：用 QQ 命中的完整原唱名再查一次咪咕，
+    // 解决《宝贝 (In A Day)》这类“搜歌手只出翻唱、搜完整名才有原唱”的缺口。
+    const extraNames = [];
+    for (let qi = 0; qi < qqSongs.length && extraNames.length < 3; qi++) {
+      const qn = musicNorm(qqSongs[qi].name);
+      const base = musicBaseTitle(qqSongs[qi].name);
+      if (!qn || qn === base || musicHasVariant(qqSongs[qi].name)) continue;
+      if (extraNames.indexOf(qn) >= 0) continue;
+      extraNames.push(qn);
+    }
+    if (extraNames.length) {
+      const extraChecks = await Promise.allSettled(extraNames.map(function (name) { return miguSearch(name, 3); }));
+      const seenMiguIds = {};
+      miguSongs.forEach(function (s) { seenMiguIds[String(s.id)] = true; });
+      extraChecks.forEach(function (check) {
+        if (check.status !== 'fulfilled') return;
+        check.value.forEach(function (song) {
+          if (!seenMiguIds[String(song.id)]) { seenMiguIds[String(song.id)] = true; miguSongs.push(song); }
+        });
+      });
+      miguSongs.sort(function (a, b) {
+        const aExact = a.playable && !musicNorm(a.artist) ? 1 : 0;
+        const bExact = b.playable && !musicNorm(b.artist) ? 1 : 0;
+        return bExact - aExact;
+      });
+    }
+    const songs = mergeMusicResults(q, neteaseSongs, kuwoSongs, qqSongs, miguSongs);
+    let currentSong = null;
+    const currentRid = String(url.searchParams.get('currentRid') || '');
+    if (currentRid) {
+      const hit = kuwoSongs.find(function (song) { return song.url && song.url.indexOf('rid=' + currentRid) >= 0; });
+      if (hit) currentSong = { name: hit.name, artist: hit.artist, url: hit.url, rid: currentRid };
+    }
+    if (songs.length) return json({ ok: true, songs, current: currentSong, sources: { netease: neteaseSongs.length, kuwo: kuwoSongs.length, qq: qqSongs.length, migu: miguSongs.length } });
     return json({ error: '没搜到相关歌曲，换个关键词试试' }, 404);
   }
 
@@ -124,22 +188,55 @@ async function handle({ request, env }) {
     }
   }
 
+  if (action === 'miguStream') {
+    // 咪咕版权受限歌曲在换链时返回 JSON；只有拿到 302 直链才进入流代理。
+    const songId = url.searchParams.get('songId') || url.searchParams.get('id') || '';
+    const copyrightId = url.searchParams.get('copyrightId') || '';
+    const contentId = url.searchParams.get('contentId') || '';
+    if (!/^\d{5,}$/.test(songId) || !/^[A-Za-z0-9]{5,}$/.test(copyrightId) || !/^[A-Za-z0-9]{5,}$/.test(contentId)) return json({ error: '参数错误' }, 400);
+    try {
+      const direct = await resolveMiguDirect(songId, copyrightId, contentId);
+      const rangeHeader = request.headers.get('range');
+      const upstream = await fetch(direct, {
+        redirect: 'follow',
+        headers: {
+          'User-Agent': MOBILE_UA,
+          Referer: 'https://music.migu.cn/',
+          ...(rangeHeader ? { Range: rangeHeader } : {})
+        }
+      });
+      if (!upstream.ok && upstream.status !== 206) return json({ error: '音频源暂不可用' }, 502);
+      const headers = new Headers();
+      headers.set('Content-Type', upstream.headers.get('content-type') || 'audio/mpeg');
+      headers.set('Content-Disposition', 'inline');
+      headers.set('Cache-Control', 'public, max-age=3600');
+      headers.set('Accept-Ranges', 'bytes');
+      if (upstream.status === 206 && upstream.headers.get('content-range')) headers.set('Content-Range', upstream.headers.get('content-range'));
+      if (upstream.headers.get('content-length')) headers.set('Content-Length', upstream.headers.get('content-length'));
+      return new Response(upstream.body, { status: upstream.status === 206 ? 206 : 200, headers: headers });
+    } catch (e) {
+      return json({ error: '该歌曲暂时无法播放（咪咕版权限制）' }, 404);
+    }
+  }
+
   if (action === 'play') {
     if (!/^\d+$/.test(String(id || ''))) return json({ error: '参数错误' }, 400);
     try {
       const upstream = await fetch(NETEASE_OUTER + '?id=' + id + '.mp3', {
         redirect: 'follow',
         headers: {
-          'User-Agent': UA,
+          'User-Agent': MOBILE_UA,
           'Referer': 'https://music.163.com/',
+          'Cookie': 'appver=8.9.70; os=android',
           ...(request.headers.get('range') ? { 'Range': request.headers.get('range') } : {})
         }
       });
       const ctype = upstream.headers.get('content-type') || '';
       if (!upstream.ok && upstream.status !== 206) return json({ error: '该歌曲暂时无法播放（可能无版权外链）' }, 404);
-      if (ctype.indexOf('text/html') >= 0) return json({ error: '该歌曲暂时无法播放（可能无版权外链）' }, 404);
+      if (ctype.indexOf('text/html') >= 0 || ctype.indexOf('application/json') >= 0) return json({ error: '该歌曲暂时无法播放（可能无版权外链）' }, 404);
       const headers = new Headers();
       headers.set('Content-Type', ctype || 'audio/mpeg');
+      headers.set('Content-Disposition', 'inline');
       headers.set('Cache-Control', 'public, max-age=3600');
       headers.set('Accept-Ranges', 'bytes');
       if (upstream.status === 206 && upstream.headers.get('content-range')) headers.set('Content-Range', upstream.headers.get('content-range'));
@@ -186,7 +283,9 @@ async function kuwoSearch(keyword) {
       duration: secs * 1000,
       url: '/api/music?action=resolve&rid=' + rid,
       playSource: 'kuwo',
-      full: true
+      sourceLabel: '酷我音乐',
+      full: true,
+      playable: true
     });
     if (out.length >= 15) break;
   }
@@ -201,28 +300,173 @@ function musicBaseTitle(value) {
 }
 function musicArtistMatches(a, b) {
   const left = musicNorm(a), right = musicNorm(b);
-  if (!left || !right) return true;
+  if (!left || !right) return left === right;
   return left.indexOf(right) >= 0 || right.indexOf(left) >= 0;
 }
-function mergeMusicResults(neteaseSongs, kuwoSongs) {
-  if (!neteaseSongs.length) return kuwoSongs.slice(0, 15);
-  const remaining = kuwoSongs.slice();
-  return neteaseSongs.slice(0, 15).map(function (song) {
-    const exactTitle = musicNorm(song.name), baseTitle = musicBaseTitle(song.name);
-    let matchIndex = remaining.findIndex(function (candidate) {
-      return musicNorm(candidate.name) === exactTitle && musicArtistMatches(song.artist, candidate.artist);
-    });
-    if (matchIndex < 0 && baseTitle) {
-      matchIndex = remaining.findIndex(function (candidate) {
-        return musicBaseTitle(candidate.name) === baseTitle && musicArtistMatches(song.artist, candidate.artist);
-      });
-    }
-    if (matchIndex >= 0) {
-      const match = remaining.splice(matchIndex, 1)[0];
-      return Object.assign({}, song, { url: match.url, playSource: 'kuwo', full: true });
-    }
-    return song;
+function musicKey(song) {
+  // 用完整歌名去重：不能把《宝贝 (In a Day)》和《宝贝 (in the night)》合并成同一首
+  return musicNorm(song.name) + '|' + musicNorm(song.artist);
+}
+function musicQueryScore(song, keyword) {
+  const q = musicNorm(keyword);
+  const title = musicBaseTitle(song.name);
+  const artist = musicNorm(song.artist);
+  let score = 0;
+  // 歌名命中远高于歌手命中：搜“晴天 周杰伦”时不能把《夜曲》排到《晴天》前面。
+  if (title && q.indexOf(title) >= 0) score += 100;
+  if (artist && q.indexOf(artist) >= 0) score += 35;
+  if (song.playable) score += 10;
+  if (song.full) score += 8;
+  return score;
+}
+function musicHasVariant(name) {
+  return /(live|cover|翻唱|现场|演唱会|伴奏|remix|mix|dj|试听|片段|纯音乐|instrumental|改编|舒缓|两会|网友|版|伴唱|消音|加速|降速|0\.8x|1\.1x|1\.2x|1\.5x)/i.test(String(name || ''));
+}
+function findExactMusic(list, song) {
+  const exactTitle = musicNorm(song.name), baseTitle = musicBaseTitle(song.name);
+  let idx = list.findIndex(function (candidate) {
+    return musicNorm(candidate.name) === exactTitle && musicArtistMatches(song.artist, candidate.artist);
   });
+  if (idx < 0 && baseTitle && !musicHasVariant(song.name)) {
+    idx = list.findIndex(function (candidate) {
+      return musicBaseTitle(candidate.name) === baseTitle && !musicHasVariant(candidate.name) && musicArtistMatches(song.artist, candidate.artist);
+    });
+  }
+  return idx >= 0 ? list[idx] : null;
+}
+function mergeMusicResults(keyword, neteaseSongs, kuwoSongs, qqSongs, miguSongs) {
+  const candidates = [];
+  const seen = new Set();
+  function add(song) {
+    const key = musicKey(song);
+    if (!key || seen.has(key)) return null;
+    seen.add(key); candidates.push(song); return song;
+  }
+  function same(song) {
+    const key = musicKey(song);
+    return candidates.find(function (candidate) { return musicKey(candidate) === key; });
+  }
+
+  // QQ/咪咕先进入，保证知名歌曲的原唱版本优先出现；再尝试从酷我/网易云补可播地址。
+  qqSongs.forEach(function (song) {
+    const kuwo = findExactMusic(kuwoSongs, song);
+    const netease = findExactMusic(neteaseSongs, song);
+    // 咪咕部分原唱条目歌手字段为空：仅当完整歌名完全一致且不是 Live/翻唱时才允许绑定。
+    const miguExact = !musicHasVariant(song.name) && miguSongs.find(function (candidate) {
+      return candidate.playable && !musicNorm(candidate.artist) && musicNorm(candidate.name) === musicNorm(song.name);
+    });
+    if (miguExact) miguExact._used = true;
+    add(Object.assign({}, song,
+      miguExact ? { url: miguExact.url, playSource: 'migu', sourceLabel: '咪咕音乐', full: true, playable: true } :
+      kuwo ? { url: kuwo.url, playSource: 'kuwo', sourceLabel: '酷我音乐', full: true, playable: true } :
+      netease ? { url: netease.url, playSource: 'netease', sourceLabel: '网易云音乐', full: false, playable: netease.playable !== false } :
+      { url: '', playSource: 'qq', sourceLabel: 'QQ音乐', full: false, playable: false }));
+  });
+  miguSongs.forEach(function (song) {
+    if (song._used) return;
+    const existing = same(song);
+    if (existing) {
+      if (song.playable && (!existing.full || !existing.playable)) {
+        existing.url = song.url; existing.playSource = 'migu'; existing.full = true; existing.playable = true;
+        existing.sourceLabel = '咪咕音乐';
+      }
+      return;
+    }
+    const kuwo = findExactMusic(kuwoSongs, song);
+    const netease = findExactMusic(neteaseSongs, song);
+    add(Object.assign({}, song,
+      song.playable ? {} :
+      kuwo ? { url: kuwo.url, playSource: 'kuwo', sourceLabel: '酷我音乐', full: true, playable: true } :
+      netease ? { url: netease.url, playSource: 'netease', sourceLabel: '网易云音乐', full: false, playable: netease.playable !== false } :
+      { url: '', playSource: 'migu', sourceLabel: '咪咕音乐', full: false, playable: false }));
+  });
+  neteaseSongs.forEach(function (song) {
+    const existing = same(song);
+    if (existing) {
+      if (!existing.playable && song.url && song.playable !== false) {
+        existing.url = song.url; existing.playSource = 'netease'; existing.sourceLabel = '网易云音乐'; existing.playable = true;
+      }
+      return;
+    }
+    const kuwo = findExactMusic(kuwoSongs, song);
+    add(Object.assign({}, song, kuwo ? { url: kuwo.url, playSource: 'kuwo', sourceLabel: '酷我音乐', full: true, playable: true } : {}));
+  });
+
+  // 其他曲库完全没结果时，酷我兜底，避免搜索空白。
+  if (!candidates.length) return kuwoSongs.slice(0, 15);
+  const qNorm = musicNorm(keyword);
+  let ranked = candidates
+    .map(function (song, index) { return { song: song, index: index, score: musicQueryScore(song, keyword) }; });
+  // 只要结果里有歌名命中，就不要把同歌手的无关歌曲（《夜曲》《发如雪》）混进前排。
+  if (ranked.some(function (item) { return qNorm.indexOf(musicBaseTitle(item.song.name)) >= 0; })) {
+    ranked = ranked.filter(function (item) { return qNorm.indexOf(musicBaseTitle(item.song.name)) >= 0; });
+  }
+  return ranked
+    .sort(function (a, b) { return b.score - a.score || a.index - b.index; })
+    .slice(0, 20)
+    .map(function (item) { return item.song; });
+}
+
+// QQ音乐：原唱曲库准确度高；无授权直链时仅提供原唱信息，不冒充完整音源。
+async function qqSearch(keyword) {
+  const params = new URLSearchParams({ w: keyword, format: 'json', n: '15', p: '1' });
+  const resp = await fetch(QQ_SEARCH + '?' + params.toString(), {
+    headers: { 'User-Agent': UA, Referer: 'https://y.qq.com/', Accept: 'application/json' }
+  });
+  if (!resp.ok) throw new Error('qq ' + resp.status);
+  const data = await resp.json();
+  const list = data && data.data && data.data.song && data.data.song.list;
+  if (!Array.isArray(list)) return [];
+  return list.slice(0, 15).map(function (s) {
+    const singers = s.singer || [];
+    return {
+      id: s.songid || s.songmid,
+      name: s.songname || '',
+      artist: singers.map(function (a) { return a.name; }).join(' / '),
+      album: s.albumname || '',
+      duration: Number(s.interval || 0) * 1000,
+      albumPic: s.albummid ? 'https://y.qq.com/music/photo_new/T002R300x300M000' + s.albummid + '.jpg' : '',
+      url: '', playSource: 'qq', sourceLabel: 'QQ音乐', full: false, playable: false
+    };
+  }).filter(function (s) { return s.name; });
+}
+
+// 咪咕：先搜索准确原唱，再对前几条尝试换取可播直链；受版权限制的保留信息但不标完整音源。
+async function miguSearch(keyword, checkLimit) {
+  const maxCheck = Math.max(0, Number(checkLimit) || 6);
+  const params = new URLSearchParams({ text: keyword, pageNo: '1', pageSize: '15', searchSwitch: MIGU_SEARCH_SWITCH });
+  const resp = await fetch(MIGU_SEARCH + '?' + params.toString(), {
+    headers: { 'User-Agent': MOBILE_UA, Referer: 'https://music.migu.cn/', Accept: 'application/json' }
+  });
+  if (!resp.ok) throw new Error('migu ' + resp.status);
+  const data = await resp.json();
+  const list = data && data.songResultData && data.songResultData.result;
+  if (!Array.isArray(list)) return [];
+  const songs = list.slice(0, 15).map(function (s) {
+    const singers = s.singers || [];
+    return {
+      id: s.id || '',
+      name: s.name || '',
+      artist: singers.map(function (a) { return a.name; }).join(' / '),
+      album: (s.albums && s.albums[0] && s.albums[0].name) || '',
+      duration: Number(s.duration || s.playTime || 0),
+      albumPic: (s.imgItems && s.imgItems[0] && s.imgItems[0].img) || '',
+      copyrightId: s.copyrightId || '',
+      contentId: s.contentId || '',
+      url: '', playSource: 'migu', sourceLabel: '咪咕音乐', full: false, playable: false
+    };
+  }).filter(function (s) { return s.name && s.id && s.copyrightId && s.contentId; });
+  const checks = await Promise.allSettled(songs.slice(0, maxCheck).map(function (s) {
+    return resolveMiguDirect(s.id, s.copyrightId, s.contentId);
+  }));
+  checks.forEach(function (check, index) {
+    if (check.status !== 'fulfilled' || !songs[index]) return;
+    songs[index].url = '/api/music?action=miguStream&songId=' + encodeURIComponent(songs[index].id)
+      + '&copyrightId=' + encodeURIComponent(songs[index].copyrightId)
+      + '&contentId=' + encodeURIComponent(songs[index].contentId);
+    songs[index].full = true; songs[index].playable = true;
+  });
+  return songs;
 }
 
 // 网易云搜索：兼容 artists/ar 字段；duration 毫秒
@@ -242,7 +486,7 @@ async function neteaseSearch(keyword) {
       const data = await resp.json();
       const list = (data && data.result && data.result.songs) || [];
       if (!list || !list.length) continue;
-      return list.slice(0, 15).map(function (s) {
+      const result = list.slice(0, 15).map(function (s) {
         const arts = s.artists || s.ar || [];
         return {
           id: s.id,
@@ -253,9 +497,25 @@ async function neteaseSearch(keyword) {
           albumPic: (s.album && s.album.picUrl) || (s.al && s.al.picUrl) || '',
           url: '/api/music?action=play&id=' + s.id,
           playSource: 'netease',
-          full: false
+          sourceLabel: '网易云音乐',
+          full: false,
+          playable: true
         };
       });
+      // 网易云无版权歌曲外链会 302 到 /404：先探测前 6 条，避免“显示可播但点了没声音”。
+      const checks = await Promise.allSettled(result.slice(0, 6).map(function (s) {
+        return fetch(NETEASE_OUTER + '?id=' + s.id + '.mp3', { redirect: 'manual', headers: { 'User-Agent': MOBILE_UA } })
+          .then(function (r) {
+            const loc = r.headers.get('location') || '';
+            const type = r.headers.get('content-type') || '';
+            if (/^http/.test(loc)) return !/\/404($|\?)/.test(loc);
+            return type.indexOf('audio') === 0 || type.indexOf('octet-stream') >= 0 || type.indexOf('mpeg') >= 0;
+          });
+      }));
+      checks.forEach(function (check, index) {
+        if (result[index]) result[index].playable = check.status === 'fulfilled' && check.value === true;
+      });
+      return result;
     } catch (e) { continue; }
   }
   return [];
