@@ -10,6 +10,7 @@ import { resolveTenant } from '../_lib/tenant.js';
 const NETEASE_SEARCH = 'https://music.163.com/api/search/get/web';
 const NETEASE_OUTER = 'https://music.163.com/song/media/outer/url';
 const NETEASE_SONG_URL = 'https://music.163.com/api/song/enhance/player/url';
+const NETEASE_PROXY = 'https://api.injahow.cn/meting/?type=url&id=';
 const KUWO_SEARCH = 'https://search.kuwo.cn/r.s';
 const KUWO_ANTI = 'http://antiserver.kuwo.cn/anti.s';
 const QQ_SEARCH = 'https://c.y.qq.com/soso/fcgi-bin/client_search_cp';
@@ -84,6 +85,27 @@ async function resolveNeteaseDirect(id) {
     type: item.type || 'mp3'
   };
   _neteaseDirectCache.set(key, meta);
+  return meta;
+}
+
+// Cloudflare 出口访问网易云官方接口会被风控，改用公开解析节点取音频；Range 仍透传给最终 CDN。
+const _neteaseProxyCache = new Map();
+async function probeNeteaseProxy(id) {
+  const key = String(id);
+  const now = Date.now();
+  const hit = _neteaseProxyCache.get(key);
+  if (hit && now - hit.t < 120000) return hit;
+  const resp = await fetch(NETEASE_PROXY + encodeURIComponent(id), {
+    headers: { 'User-Agent': MOBILE_UA, Range: 'bytes=0-0' }
+  });
+  const ctype = resp.headers.get('content-type') || '';
+  const cr = resp.headers.get('content-range') || '';
+  if ((resp.status !== 200 && resp.status !== 206) || (ctype.indexOf('audio') < 0 && ctype.indexOf('octet-stream') < 0)) {
+    throw new Error('netease proxy unavailable');
+  }
+  const total = Number((/(\d+)$/.exec(cr) || [])[1] || 0);
+  const meta = { t: now, size: total, url: NETEASE_PROXY + encodeURIComponent(id) };
+  _neteaseProxyCache.set(key, meta);
   return meta;
 }
 
@@ -249,15 +271,28 @@ async function handle({ request, env }) {
   if (action === 'play') {
     if (!/^\d+$/.test(String(id || ''))) return json({ error: '参数错误' }, 400);
     try {
-      const meta = await resolveNeteaseDirect(id);
-      const upstream = await fetch(meta.url, {
-        redirect: 'follow',
-        headers: {
-          'User-Agent': MOBILE_UA,
-          'Referer': 'https://music.163.com/',
-          ...(request.headers.get('range') ? { 'Range': request.headers.get('range') } : {})
+      const rangeHeader = request.headers.get('range');
+      const audioHeaders = {
+        'User-Agent': MOBILE_UA,
+        'Referer': 'https://music.163.com/',
+        ...(rangeHeader ? { 'Range': rangeHeader } : {})
+      };
+      let upstream = null;
+      try {
+        upstream = await fetch(NETEASE_PROXY + encodeURIComponent(id), { redirect: 'follow', headers: audioHeaders });
+      } catch (e) { upstream = null; }
+      const firstType = upstream ? (upstream.headers.get('content-type') || '') : '';
+      const firstOk = !!upstream && (upstream.ok || upstream.status === 206)
+        && (firstType.indexOf('audio') >= 0 || firstType.indexOf('octet-stream') >= 0);
+      if (!firstOk) {
+        // 公开解析节点异常时回退网易云官方接口（部分地区/出口可能可用）
+        try {
+          const meta = await resolveNeteaseDirect(id);
+          upstream = await fetch(meta.url, { redirect: 'follow', headers: audioHeaders });
+        } catch (e) {
+          return json({ error: '该歌曲暂时无法播放（可能无版权外链）' }, 404);
         }
-      });
+      }
       const ctype = upstream.headers.get('content-type') || '';
       if (!upstream.ok && upstream.status !== 206) return json({ error: '该歌曲暂时无法播放（可能无版权外链）' }, 404);
       if (ctype.indexOf('text/html') >= 0 || ctype.indexOf('application/json') >= 0) return json({ error: '该歌曲暂时无法播放（可能无版权外链）' }, 404);
@@ -531,15 +566,15 @@ async function neteaseSearch(keyword) {
           playable: true
         };
       });
-      // 用官方播放地址接口探测前 6 条：能拿到直链才可播；无 freeTrialInfo 且文件较大时标为完整音源。
+      // 用公开解析节点探测前 6 条：能拿到音频才可播；文件 ≥1.5MB 视为完整音源。
       const checks = await Promise.allSettled(result.slice(0, 6).map(function (s) {
-        return resolveNeteaseDirect(s.id);
+        return probeNeteaseProxy(s.id);
       }));
       checks.forEach(function (check, index) {
         if (!result[index]) return;
         if (check.status !== 'fulfilled') { result[index].playable = false; return; }
         result[index].playable = true;
-        result[index].full = !check.value.trial && check.value.size >= 1500000;
+        result[index].full = check.value.size >= 1500000;
         result[index].fileSize = check.value.size;
       });
       return result;
