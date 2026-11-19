@@ -191,14 +191,17 @@ export async function onRequest(context) {
     }
     if (action === 'getConfig') {
       context.waitUntil(cleanupEnvironmentReports(config, tenant));
-      // 会话可选：带会话时判断是否可编辑
-      let session = null;
+      // 会话可选：带会话时判断是否可编辑；会话校验与配置/媒体查询并行
       const token = body.sessionToken || '';
-      if (token) {
-        try { session = await requireSession(config, token, tenant); } catch (e) { session = null; }
-      }
-      const row = await fetchConfigRow(config, tenant) || {};
-      const items = await fetchMedia(config, tenant);
+      const sessionPromise = token
+        ? requireSession(config, token, tenant).catch(() => null)
+        : Promise.resolve(null);
+      const [rowRaw, items, session] = await Promise.all([
+        fetchConfigRow(config, tenant),
+        fetchMedia(config, tenant),
+        sessionPromise
+      ]);
+      const row = rowRaw || {};
       const out = {
         enabled: !!row.enabled,
         mode: row.mode || 'photos',
@@ -215,8 +218,9 @@ export async function onRequest(context) {
       };
       if (session) {
         const username = session.username;
+        // 配置行已经包含授权列表，不再重复查询一次配置表
+        const authUsers = Array.isArray(row.authorized_users) ? row.authorized_users : [];
         const isAdmin = await checkAdmin(config, username, tenant);
-        const authUsers = await authorizedUsernames(config, tenant).catch(() => []);
         out.canEdit = isAdmin || authUsers.indexOf(username) !== -1;
         if (out.canEdit) {
           out.isAdmin = isAdmin;
