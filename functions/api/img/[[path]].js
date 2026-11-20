@@ -23,6 +23,8 @@ const PUBLIC_PREFIXES = ['/loginbg/'];
 // - 兜底：仍有按路径的主动 purge，跨 colo 未命中时最坏按 TTL 过期
 const IMAGE_CACHE_TTL = 3600;
 const VIDEO_CACHE_TTL = 86400;
+// 预生成的 480px 缩略图体积小、内容不变，可长缓存（7 天）
+const THUMB_CACHE_TTL = 604800;
 // 相册列表只加载缩略图，点开仍看原图。宽度采用固定档位，避免任意参数造成无限制转换。
 const ALLOWED_IMAGE_WIDTHS = new Set([480, 960]);
 function requestedImageWidth(url, rel) {
@@ -42,6 +44,24 @@ async function verifyInternalResize(url, rel, secret) {
 }
 function ttlFor(rel) {
   return /\.(mp4|mov|webm|m4v|3gp|3g2|avi|mpeg|mkv)$/i.test(rel) ? VIDEO_CACHE_TTL : IMAGE_CACHE_TTL;
+}
+
+// 损坏媒体清单只在当前 Worker 实例里拉取一次；清单很小（不到 1KB）。
+let brokenMediaCache = null;
+async function isBrokenMediaPath(rel, owner, repo, branch, pat) {
+  try {
+    if (!brokenMediaCache) {
+      const url = `https://raw.githubusercontent.com/${owner}/${repo}/${encodeURIComponent(branch)}/thumbs/_broken.json`;
+      brokenMediaCache = fetch(url, { headers: { Authorization: `Bearer ${pat}`, 'User-Agent': 'couple-site-private-img' } })
+        .then(r => r.ok ? r.json() : [])
+        .then(v => Array.isArray(v) ? v : [])
+        .catch(() => []);
+    }
+    const list = await brokenMediaCache;
+    return list.includes(rel);
+  } catch (e) {
+    return false;
+  }
 }
 
 export async function onRequest(context) {
@@ -139,6 +159,61 @@ export async function onRequest(context) {
     const branch = String(env.GITHUB_IMG_BRANCH || 'main');
     const pat = String(env.GITHUB_IMG_TOKEN || '');
     if (!owner || !repo || !pat) return jsonResponse({ error: '图片服务未配置完整' }, 500);
+
+    // 优先命中预生成缩略图：相册只请求 w=480，直接取 thumbs 下的小图，
+    // 不再回源下载完整原图做现场缩放（历史原图最大 15MB，冷缓存时会形成回源洪峰）。
+    if (resizeWidth === 480 && /\.(jpe?g|png|gif|webp|avif|heic|heif)$/i.test(rel)) {
+      const thumbRel = '/thumbs' + rel.replace(/\.(jpe?g|png|gif|webp|avif|heic|heif)$/i, '.jpg');
+      const thumbCacheKey = new Request(`https://img-cache.local${thumbRel}?thumb=480`);
+      const thumbCached = await cache.match(thumbCacheKey);
+      if (thumbCached) {
+        const ch = new Headers(thumbCached.headers);
+        ch.delete('Access-Control-Allow-Origin');
+        if (aco) ch.set('Access-Control-Allow-Origin', aco);
+        return new Response(thumbCached.body, { status: 200, headers: ch });
+      }
+      const thumbUpstream = `https://raw.githubusercontent.com/${owner}/${repo}/${encodeURIComponent(branch)}/${thumbRel.split('/').filter(Boolean).map(s => encodeURIComponent(s)).join('/')}`;
+      const thumbResp = await fetch(thumbUpstream, {
+        headers: { Authorization: `Bearer ${pat}`, 'User-Agent': 'couple-site-private-img' }
+      });
+      if (thumbResp.ok) {
+        const thumbHeaders = {
+          'Content-Type': 'image/jpeg',
+          'Cache-Control': `public, max-age=${THUMB_CACHE_TTL}`,
+          'X-Content-Type-Options': 'nosniff',
+          ...(aco ? { 'Access-Control-Allow-Origin': aco } : {})
+        };
+        const thumbLength = thumbResp.headers.get('Content-Length');
+        if (thumbLength) thumbHeaders['Content-Length'] = thumbLength;
+        const thumbOut = new Response(thumbResp.body, { status: 200, headers: thumbHeaders });
+        if (cache.put) {
+          const p = cache.put(thumbCacheKey, thumbOut.clone()).catch(() => {});
+          if (typeof context.waitUntil === 'function') context.waitUntil(p); else await p;
+        }
+        return thumbOut;
+      }
+      // thumbs 未命中（新上传的照片）→ 走原来的现场缩放链路
+    }
+
+    // 原文件已经损坏的媒体（历史上传事故留下的空帧 GIF/88 字节 HEIC）：
+    // 点开预览时也不要再拉十几 MB 的坏文件，直接返回占位缩略图。
+    if (!resizeWidth && /\.(jpe?g|gif|heic|heif)$/i.test(rel) && await isBrokenMediaPath(rel, owner, repo, branch, pat)) {
+      const placeholderRel = '/thumbs' + rel.replace(/\.(jpe?g|gif|heic|heif)$/i, '.jpg');
+      const placeholderResp = await fetch(`https://raw.githubusercontent.com/${owner}/${repo}/${encodeURIComponent(branch)}/${placeholderRel.split('/').filter(Boolean).map(s => encodeURIComponent(s)).join('/')}`, {
+        headers: { Authorization: `Bearer ${pat}`, 'User-Agent': 'couple-site-private-img' }
+      });
+      if (placeholderResp.ok) {
+        return new Response(placeholderResp.body, {
+          status: 200,
+          headers: {
+            'Content-Type': 'image/jpeg',
+            'Cache-Control': 'public, max-age=604800',
+            'X-Content-Type-Options': 'nosniff',
+            ...(aco ? { 'Access-Control-Allow-Origin': aco } : {})
+          }
+        });
+      }
+    }
 
     const upstreamPath = segs.map(s => encodeURIComponent(s)).join('/');
     const upstream = `https://raw.githubusercontent.com/${owner}/${repo}/${encodeURIComponent(branch)}/${upstreamPath}`;

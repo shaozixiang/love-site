@@ -110,6 +110,24 @@ export async function onRequest(context) {
       return jsonResponse({ error: `文件过大：${kind === 'video' ? '视频' : (kind === 'audio' ? '音乐' : '图片')}请控制在 ${limitMb}MB 以内。` }, 413, headers);
     }
 
+    // 内容完整性校验：拒绝只有文件头、1×1 空帧的损坏媒体。
+    // 历史事故中这类文件会被当成正常图片存下来，前端长时间加载后显示破图。
+    if (kind === 'image') {
+      if (arrayBuffer.byteLength < 1024) {
+        return jsonResponse({ error: '图片内容不完整（文件过小），请重新导出后再上传。' }, 400, headers);
+      }
+      if (extension === 'gif') {
+        const b = new Uint8Array(arrayBuffer, 0, Math.min(10, arrayBuffer.byteLength));
+        if (b.length >= 10) {
+          const width = b[6] | (b[7] << 8);
+          const height = b[8] | (b[9] << 8);
+          if (width < 2 || height < 2) {
+            return jsonResponse({ error: '这个 GIF 已损坏（只有 1×1 空帧），请从相册重新导出后再上传。' }, 400, headers);
+          }
+        }
+      }
+    }
+
     const folder = sanitizeFolder(formData.get('folder') || 'common');
 
     // 登录页背景文件夹：仅管理员或被授权用户可传（服务端强制，防止越权塞内容）
