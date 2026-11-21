@@ -1058,9 +1058,89 @@ img, video { max-width: 100%; display: block; }
 .lui-mb-8 { margin-bottom: 8px; } .lui-mb-12 { margin-bottom: 12px; } .lui-mb-16 { margin-bottom: 16px; }
 .lui-gap-6 { gap: 6px; } .lui-gap-10 { gap: 10px; } .lui-gap-16 { gap: 16px; }
 
-/* 大屏适配（用户端在平板/桌面呈现为居中小手机宽度，不做拉伸；管理员后台铺满） */
-@media (min-width: 640px) {
+/* 平板：保留手机式居中容器，仅放宽左右留白 */
+@media (min-width: 640px) and (max-width: 1099px) {
     .lui-shell { padding-left: 20px; padding-right: 20px; }
+}
+
+/* 桌面端：左侧固定导航 + 右侧宽幅内容区，不再把主站压成窄手机栏 */
+@media (min-width: 1100px) {
+    #mainPage .lui-shell {
+        max-width: 1280px;
+        display: grid;
+        grid-template-columns: 248px minmax(0, 1fr);
+        gap: 30px;
+        padding: 28px 32px 90px;
+        align-items: start;
+    }
+    #mainPage .lui-body {
+        grid-column: 2;
+        grid-row: 1;
+        min-width: 0;
+        padding-bottom: 0;
+    }
+    #mainPage .lui-tabbar {
+        grid-column: 1;
+        grid-row: 1;
+        position: sticky;
+        top: 24px;
+        left: auto;
+        transform: none;
+        width: auto;
+        max-width: none;
+        flex-direction: column;
+        gap: 5px;
+        padding: 12px;
+        border-radius: 24px;
+        box-shadow: var(--sh-md);
+    }
+    #mainPage .lui-tabbar .tab {
+        flex: none;
+        flex-direction: row;
+        justify-content: flex-start;
+        gap: 13px;
+        padding: 13px 15px;
+        border-radius: 16px;
+    }
+    #mainPage .lui-tabbar .tab .t-label { font-size: var(--f-sub); font-weight: 600; }
+
+    #mainPage .love-hero { padding: 28px 30px; }
+    #mainPage .love-hero h1 { font-size: 32px; }
+    #mainPage .user-bar { padding: 4px 2px 18px; }
+
+    /* 表单输入区与内容列表左右分栏；列表在右栏自适应宽 */
+    #messageSection.active,
+    #gallerySection.active,
+    #memorySection.active,
+    #loveSection.active,
+    #memoSection.active {
+        display: grid;
+        grid-template-columns: minmax(310px, 390px) minmax(0, 1fr);
+        gap: 22px;
+        align-items: start;
+    }
+    #messageSection.active > .lui-card:first-child,
+    #gallerySection.active > .lui-card:first-child,
+    #memorySection.active > .lui-card:first-child,
+    #loveSection.active > .lui-card:first-child,
+    #memoSection.active > .lui-card:first-child {
+        position: sticky;
+        top: 24px;
+    }
+    #messageSection.active > #messageList,
+    #gallerySection.active > #galleryContainer,
+    #memorySection.active > #memoryList,
+    #loveSection.active > #loveList,
+    #memoSection.active > #memoList { min-width: 0; }
+
+    /* 相册在宽屏下展示更多列；单图/留言卡片保持可读宽度 */
+    #galleryContainer .feed-grid { grid-template-columns: repeat(4, 1fr); gap: 8px; padding: 6px 16px 10px; }
+    #galleryContainer .grid-cell.single { grid-column: span 4; max-height: 420px; }
+    #messageList, #galleryContainer { max-width: 920px; }
+    #map.map-container { height: 460px; }
+
+    /* 登录页桌面端：留白更舒展，卡片保持居中 */
+    #loginPage { padding: 40px; }
 }
 
 /* ---------- 15. 动画 ---------- */
